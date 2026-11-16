@@ -13,6 +13,9 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.BaseAdapter
+import android.widget.EditText
+import android.widget.Spinner
+import android.widget.ArrayAdapter
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
@@ -86,7 +89,7 @@ class AppManagerActivity : AppCompatActivity() {
         root.addView(subtitle)
         searchInput = EditText(this).apply {
             hint = "חיפוש לפי שם אפליקציה או package id"
-            singleLine = true
+            setSingleLine(true)
             textDirection = View.TEXT_DIRECTION_RTL
             setPadding(dp(12), dp(8), dp(12), dp(8))
             background = GradientDrawable().apply {
