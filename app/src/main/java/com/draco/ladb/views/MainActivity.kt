@@ -160,40 +160,103 @@ class MainActivity : AppCompatActivity() {
     }
     private fun runCommand(cmd:String){ if(cmd.isBlank())return; if(vm.adb.running.value!=true){ Toast.makeText(this,"תחילה יש להתחבר ל־ADB",Toast.LENGTH_SHORT).show(); return }; saveHistory(cmd); vm.adb.sendToShellProcess(cmd); command.setText("") }
     private fun saveHistory(cmd:String){ val p=getSharedPreferences("command_history",0); val old=p.getString("items","")!!.split("\n").filter{it.isNotBlank()}; p.edit().putString("items",(listOf(cmd)+old).distinct().take(80).joinToString("\n")).apply() }
-    private fun selectedGeminiModel(): String {
-        val prefs=getSharedPreferences("ai_settings",0)
-        val saved=prefs.getString("model",null)
-        if(saved.isNullOrBlank() || saved=="gemini-2.0-flash") {
-            prefs.edit().putString("model","gemini-3.8-flash").apply()
-            return "gemini-3.8-flash"
-        }
-        return saved
+    private fun resolveAppCandidates(request: String): String {
+        return try {
+            val normalized = request.lowercase(java.util.Locale.ROOT)
+            packageManager.getInstalledApplications(android.content.pm.PackageManager.GET_META_DATA)
+                .mapNotNull { info ->
+                    val appLabel = try { packageManager.getApplicationLabel(info).toString() } catch (_: Exception) { info.packageName }
+                    val label = appLabel.trim()
+                    if (label.length < 2) null
+                    else {
+                        val name = label.lowercase(java.util.Locale.ROOT)
+                        if (normalized.contains(name) || normalized.contains(info.packageName.lowercase(java.util.Locale.ROOT))) {
+                            Pair(label, info.packageName)
+                        } else null
+                    }
+                }
+                .distinctBy { it.second }
+                .sortedByDescending { it.first.length }
+                .take(20)
+                .joinToString("\\n") { it.first + " => " + it.second }
+        } catch (_: Exception) { "" }
     }
+
+    private fun isSafeReadOnlyCommand(command: String): Boolean {
+        val cmd = command.trim()
+        if (cmd.isEmpty() || cmd.length > 500) return false
+        // No shell chaining, redirects, substitutions, quotes, or pipelines.
+        if (!cmd.matches(Regex("[A-Za-z0-9_./:=,@+ -]+"))) return false
+        val patterns = listOf(
+            Regex("getprop(?: [A-Za-z0-9_.-]+)?"),
+            Regex("pm list packages(?: -[A-Za-z0-9_-]+)*"),
+            Regex("pm list permissions(?: -[A-Za-z0-9_-]+)*"),
+            Regex("pm path [A-Za-z0-9._]+"),
+            Regex("cmd package list packages(?: -[A-Za-z0-9_-]+)*"),
+            Regex("dumpsys (battery|package|activity|window|meminfo|wifi|display|power|connectivity|deviceidle|jobscheduler|notification|input_method)(?: [A-Za-z0-9._:-]+)?"),
+            Regex("df(?: -[hPk]+)?"),
+            Regex("ip (addr|route|link)(?: show)?"),
+            Regex("wm (size|density)"),
+            Regex("settings get (system|secure|global) [A-Za-z0-9_.-]+"),
+            Regex("appops get [A-Za-z0-9._]+(?: [A-Z_]+)?"),
+            Regex("ps -A"),
+            Regex("id"),
+            Regex("uname -a"),
+            Regex("cat /proc/(meminfo|cpuinfo|uptime|version|loadavg)")
+        )
+        return patterns.any { it.matches(cmd) }
+    }
+
     private fun askAi(){
-        val request=aiRequest.text.toString().trim(); val key=ApiKeyVault.read(this)
-        if(request.isBlank()){ Toast.makeText(this,"כתוב מה תרצה לבצע",Toast.LENGTH_SHORT).show(); return }
-        if(key.isBlank()){ Toast.makeText(this,"הוסף מפתח Gemini בהגדרות",Toast.LENGTH_LONG).show(); startActivity(Intent(this,SettingsActivity::class.java)); return }
+        val request=aiRequest.text.toString().trim()
+        if(request.isBlank()){
+            Toast.makeText(this,"כתוב מה תרצה לבצע",Toast.LENGTH_SHORT).show()
+            return
+        }
+        val matches=resolveAppCandidates(request)
+        val appContext=if(matches.isBlank()) {
+            "לא נמצאה התאמה מדויקת לשם אפליקציה שהוזכר בבקשה. אל תנחש מזהה חבילה; בקש הבהרה."
+        } else {
+            "התאמות מקומיות לשמות אפליקציות מותקנות (שם אפליקציה => package id):\\n" + matches
+        }
         aiRequest.isEnabled=false
         lifecycleScope.launch {
-            val result=withContext(Dispatchers.IO){ try {
-                val model=selectedGeminiModel()
-                val url=URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
-                val conn=url.openConnection() as HttpURLConnection
-                conn.requestMethod="POST"; conn.connectTimeout=20000; conn.readTimeout=30000; conn.doOutput=true; conn.setRequestProperty("Content-Type","application/json"); conn.setRequestProperty("x-goog-api-key",key)
-                val history=getSharedPreferences("command_history",0).getString("items","") ?: ""
-                val prompt="אתה מומחה Android ADB. המשתמש מבקש: $request. היסטוריית פקודות קודמות: $history. החזר פקודת shell אחת בלבד שמתאימה ל-ADB shell במכשיר Android. בלי Markdown ובלי הסברים. אל תציע מחיקת מידע, איפוס, השבתת אבטחה או שינוי מסוכן ללא צורך ברור. אם הבקשה מסוכנת או לא ברורה החזר בדיוק: NEEDS_CLARIFICATION"
-                val body=JSONObject().put("contents",org.json.JSONArray().put(JSONObject().put("parts",org.json.JSONArray().put(JSONObject().put("text",prompt))))).put("generationConfig",JSONObject().put("temperature",0.1).put("maxOutputTokens",250))
-                OutputStreamWriter(conn.outputStream).use{it.write(body.toString())}
-                val stream=if(conn.responseCode in 200..299) conn.inputStream else conn.errorStream
-                val raw=stream.bufferedReader().use{it.readText()}
-                if(conn.responseCode !in 200..299) throw Exception("שגיאת API ${conn.responseCode}: $raw")
-                val json=JSONObject(raw)
-                json.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text").trim().removeSurrounding("```").trim()
-            }catch(e:Exception){ "ERROR: ${e.message}" } }
+            val result=withContext(Dispatchers.IO){
+                try {
+                    val history=getSharedPreferences("command_history",0).getString("items","") ?: ""
+                    val prompt="אתה מומחה Android ADB. המשתמש מבקש: $request.\\n$appContext\\nהשתמש במזהה החבילה המדויק מהרשימה אם הבקשה מתייחסת לאחת האפליקציות. אל תמציא package id. היסטוריית פקודות: $history. החזר פקודת ADB shell אחת בלבד, ללא Markdown, הסברים או עטיפות. אם חסר מידע חיוני החזר בדיוק NEEDS_CLARIFICATION. אל תייצר פקודות שמוחקות מידע, מאפסות את המכשיר או משביתות רכיבי אבטחה."
+                    AiProviderClient.generate(this@MainActivity,prompt,300).let { it }
+                } catch(e:Exception) { "ERROR: ${e.message}" }
+            }
             aiRequest.isEnabled=true
-            if(result.startsWith("ERROR:")){ AlertDialog.Builder(this@MainActivity).setTitle("שגיאת AI").setMessage(result.removePrefix("ERROR:")).setPositiveButton("אישור",null).show(); return@launch }
-            if(result=="NEEDS_CLARIFICATION"){ Toast.makeText(this@MainActivity,"הבקשה דורשת הבהרה או פעולה בטוחה יותר",Toast.LENGTH_LONG).show(); return@launch }
-            AlertDialog.Builder(this@MainActivity).setTitle("פקודה שהסוכן הכין").setMessage(result).setNegativeButton("ביטול",null).setNeutralButton("העתק"){_,_-> (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("ADB",result)); Toast.makeText(this@MainActivity,"הפקודה הועתקה",Toast.LENGTH_SHORT).show() }.setPositiveButton("בצע"){_,_-> runCommand(result) }.show()
+            if(result.text.startsWith("ERROR:")){
+                AlertDialog.Builder(this@MainActivity).setTitle("שגיאת AI")
+                    .setMessage(result.text.removePrefix("ERROR:")).setPositiveButton("אישור",null).show()
+                return@launch
+            }
+            val commandText=result.text.trim().removeSurrounding("```").trim()
+            if(commandText=="NEEDS_CLARIFICATION"){
+                Toast.makeText(this@MainActivity,"הבקשה דורשת הבהרה. בדוק את שם האפליקציה או פרט נוסף.",Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            if(result.usedFallback) {
+                Toast.makeText(this@MainActivity,"המודל הראשי עמוס. התשובה התקבלה ממודל הגיבוי ${result.model}.",Toast.LENGTH_LONG).show()
+            }
+            if(isSafeReadOnlyCommand(commandText)) {
+                runCommand(commandText)
+                Toast.makeText(this@MainActivity,"פקודת קריאה בלבד הופעלה ללא אישור נוסף.",Toast.LENGTH_SHORT).show()
+            } else {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("פקודה מוכנה – נדרש אישור")
+                    .setMessage(commandText + "\\n\\nהפקודה עשויה לשנות נתונים או הגדרות. היא לא תבוצע עד לאישור שלך.")
+                    .setNegativeButton("ביטול",null)
+                    .setNeutralButton("העתק"){_,_->
+                        (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                            .setPrimaryClip(android.content.ClipData.newPlainText("ADB",commandText))
+                    }
+                    .setPositiveButton("אשר ובצע"){_,_->runCommand(commandText)}
+                    .show()
+            }
         }
     }
 
@@ -203,50 +266,33 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this,"אין פלט להסביר. הרץ קודם פקודת ADB.",Toast.LENGTH_SHORT).show()
             return
         }
-        val key=ApiKeyVault.read(this)
-        if(key.isBlank()) {
-            Toast.makeText(this,"הוסף מפתח Gemini בהגדרות",Toast.LENGTH_LONG).show()
-            startActivity(Intent(this,SettingsActivity::class.java))
-            return
-        }
-        val prompt="הסבר בעברית פשוטה את תגובת ADB הבאה. פתח בסיכום קצר, הסבר שורות וערכים חשובים, ציין שגיאות או סימני אזהרה והצע מה לבדוק בהמשך. אל תטען שפעולה הצליחה אם הפלט אינו מוכיח זאת. שמור על ניסוח ברור ומעשי.\\n\\nתגובת ADB:\\n"+response.takeLast(14000)
         lifecycleScope.launch {
             val result=withContext(Dispatchers.IO) {
                 try {
-                    val model=selectedGeminiModel()
-                    val url=URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
-                    val conn=url.openConnection() as HttpURLConnection
-                    conn.requestMethod="POST"
-                    conn.connectTimeout=20000
-                    conn.readTimeout=45000
-                    conn.doOutput=true
-                    conn.setRequestProperty("Content-Type","application/json")
-                    conn.setRequestProperty("x-goog-api-key",key)
-                    val body=JSONObject()
-                        .put("contents",org.json.JSONArray().put(JSONObject().put("parts",org.json.JSONArray().put(JSONObject().put("text",prompt)))))
-                        .put("generationConfig",JSONObject().put("temperature",0.2).put("maxOutputTokens",900))
-                    OutputStreamWriter(conn.outputStream).use{it.write(body.toString())}
-                    val stream=if(conn.responseCode in 200..299) conn.inputStream else conn.errorStream
-                    val raw=stream.bufferedReader().use{it.readText()}
-                    if(conn.responseCode !in 200..299) throw Exception("שגיאת API ${conn.responseCode}: $raw")
-                    JSONObject(raw).getJSONArray("candidates").getJSONObject(0)
-                        .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text").trim()
-                } catch(e:Exception) { "ERROR: ${e.message}" }
+                    AiProviderClient.generate(
+                        this@MainActivity,
+                        "הסבר בעברית פשוטה את תגובת ADB הבאה. פתח בסיכום קצר, הסבר שורות וערכים חשובים, ציין שגיאות או סימני אזהרה והצע מה לבדוק בהמשך. אל תטען שפעולה הצליחה אם הפלט אינו מוכיח זאת.\\n\\nתגובת ADB:\\n" + response.takeLast(14000),
+                        900
+                    )
+                } catch(e:Exception) { null }
             }
-            if(result.startsWith("ERROR:")) {
+            if(result==null) {
                 AlertDialog.Builder(this@MainActivity).setTitle("לא הצלחתי להסביר את הפלט")
-                    .setMessage(result.removePrefix("ERROR:")).setPositiveButton("סגור",null).show()
+                    .setMessage("בדוק שמוגדר מפתח API ושהמודל הראשי או מודל הגיבוי זמינים.")
+                    .setPositiveButton("סגור",null).show()
             } else {
-                AlertDialog.Builder(this@MainActivity).setTitle("הסבר תגובת ADB")
-                    .setMessage(result)
+                val title=if(result.usedFallback) "הסבר תגובת ADB – מודל גיבוי" else "הסבר תגובת ADB"
+                AlertDialog.Builder(this@MainActivity).setTitle(title)
+                    .setMessage(result.text)
                     .setNeutralButton("העתק הסבר"){_,_->
                         (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                            .setPrimaryClip(android.content.ClipData.newPlainText("הסבר ADB",result))
+                            .setPrimaryClip(android.content.ClipData.newPlainText("הסבר ADB",result.text))
                     }
                     .setPositiveButton("סגור",null).show()
             }
         }
     }
+
     private fun showPairDialog(){
         // A custom, height-bounded dialog keeps the action buttons visible in split-screen.
         val dialog = android.app.Dialog(this)
