@@ -1,0 +1,46 @@
+name: Build release APK
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  import-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout app overlay
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Import LADB engine source
+        if: hashFiles('app/build.gradle') == ''
+        run: |
+          git clone --depth 1 https://github.com/tytydraco/LADB.git /tmp/ladb
+          rsync -a --exclude='.git' /tmp/ladb/ ./
+          mkdir -p app/src/main/java/com/draco/ladb/views app/src/main/java/com/draco/ladb/utils
+          cp -a .overlay/. ./
+          rm -rf .overlay
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Import LADB engine and add Hebrew AI interface" || true
+          git push
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Build release APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --stacktrace
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ladb-hebrew-ai-release
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
