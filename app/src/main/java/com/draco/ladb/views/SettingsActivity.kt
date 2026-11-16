@@ -2,81 +2,90 @@ package com.draco.ladb.views
 
 import android.app.Activity
 import android.os.Bundle
+import android.content.Intent
+import android.net.Uri
 import android.view.Gravity
+import android.view.View
 import android.widget.*
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import com.draco.ladb.utils.ApiKeyVault
+import com.draco.ladb.utils.AiProviderClient
 
 class SettingsActivity : Activity() {
-    private val blue = Color.rgb(23,105,210)
-    private lateinit var modelSpinner: Spinner
-    private lateinit var modelStatus: TextView
-    private val modelIds = mutableListOf<String>()
-    private val modelLabels = mutableListOf<String>()
-    private fun dp(v:Int)= (v*resources.displayMetrics.density).toInt()
-    private fun card(): LinearLayout = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(14),dp(16),dp(14)); background=GradientDrawable().apply { setColor(Color.WHITE); cornerRadius=dp(16).toFloat(); setStroke(dp(1),Color.rgb(224,235,249)) } }
-    private fun setModelOptions(options: List<Pair<String,String>>, selected: String) {
-        modelIds.clear()
-        modelLabels.clear()
-        options.forEach { pair ->
-            modelIds.add(pair.first)
-            modelLabels.add(pair.second + "  •  " + pair.first)
+    private val blue = Color.rgb(23, 105, 210)
+    private val providerIds = listOf("gemini", "openai", "anthropic", "custom")
+    private val providerNames = listOf("Google Gemini", "OpenAI", "Anthropic Claude", "ספק תואם OpenAI")
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    private fun card(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(16), dp(14), dp(16), dp(14))
+        background = GradientDrawable().apply {
+            setColor(Color.WHITE)
+            cornerRadius = dp(16).toFloat()
+            setStroke(dp(1), Color.rgb(224, 235, 249))
         }
-        val adapter=ArrayAdapter(this,android.R.layout.simple_spinner_item,modelLabels)
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        modelSpinner.adapter=adapter
-        val index=modelIds.indexOf(selected).takeIf { it >= 0 } ?: 0
-        if(modelIds.isNotEmpty()) modelSpinner.setSelection(index)
     }
 
-    private fun refreshModels(apiKey: String) {
-        if(apiKey.isBlank()) {
-            Toast.makeText(this,"הזן מפתח Gemini לפני רענון רשימת המודלים",Toast.LENGTH_LONG).show()
+    private fun heading(text: String): TextView = TextView(this).apply {
+        this.text = text
+        textSize = 18f
+        setTextColor(blue)
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.RIGHT
+        setPadding(0, dp(18), 0, dp(8))
+    }
+
+    private fun textField(hintText: String, value: String = "", secret: Boolean = false): EditText =
+        EditText(this).apply {
+            hint = hintText
+            setText(value)
+            gravity = Gravity.RIGHT
+            setSingleLine(true)
+            textDirection = View.TEXT_DIRECTION_LTR
+            if (secret) inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+
+    private fun providerSpinner(selected: String): Spinner {
+        val spinner = Spinner(this)
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, providerNames)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spinner.adapter = adapter
+        spinner.setSelection(providerIds.indexOf(selected).takeIf { it >= 0 } ?: 0)
+        return spinner
+    }
+
+    private fun selectedProvider(spinner: Spinner): String =
+        providerIds.getOrNull(spinner.selectedItemPosition) ?: "gemini"
+
+    private fun refreshModelList(provider: String, key: String, modelField: EditText, status: TextView) {
+        if (key.isBlank()) {
+            Toast.makeText(this, "הזן ושמור מפתח API של הספק לפני טעינת מודלים", Toast.LENGTH_LONG).show()
             return
         }
-        modelStatus.text="טוען מודלים שזמינים למפתח שהזנת…"
+        status.text = "טוען מודלים מהספק…"
         Thread {
             try {
-                val connection=java.net.URL("https://generativelanguage.googleapis.com/v1beta/models?pageSize=100")
-                    .openConnection() as java.net.HttpURLConnection
-                connection.requestMethod="GET"
-                connection.connectTimeout=15000
-                connection.readTimeout=20000
-                connection.setRequestProperty("x-goog-api-key",apiKey)
-                val code=connection.responseCode
-                val stream=if(code in 200..299) connection.inputStream else connection.errorStream
-                val raw=stream.bufferedReader().use { it.readText() }
-                if(code !in 200..299) throw Exception("HTTP " + code + ": " + raw)
-                val json=org.json.JSONObject(raw)
-                val array=json.optJSONArray("models") ?: org.json.JSONArray()
-                val found=mutableListOf<Pair<String,String>>()
-                for(i in 0 until array.length()) {
-                    val item=array.getJSONObject(i)
-                    val id=item.optString("name").removePrefix("models/")
-                    val methods=item.optJSONArray("supportedGenerationMethods") ?: org.json.JSONArray()
-                    val supportsGenerate=(0 until methods.length()).any { methods.optString(it)=="generateContent" }
-                    if(id.startsWith("gemini-") && supportsGenerate) {
-                        val display=item.optString("displayName",id).ifBlank { id }
-                        found.add(Pair(id,display))
-                    }
-                }
-                val sorted=found.distinctBy { it.first }.sortedBy { it.second }
+                val models = AiProviderClient.listModels(this, provider, key)
                 runOnUiThread {
-                    if(sorted.isEmpty()) {
-                        modelStatus.text="לא נמצאו מודלים זמינים ליצירת טקסט עבור המפתח הזה."
-                    } else {
-                        val selected=modelIds.getOrNull(modelSpinner.selectedItemPosition) ?: "gemini-3.8-flash"
-                        setModelOptions(sorted,selected)
-                        modelStatus.text="נמצאו " + sorted.size + " מודלים שתומכים ב־generateContent. הבחירה תישמר כברירת מחדל."
-                        Toast.makeText(this,"רשימת המודלים עודכנה",Toast.LENGTH_SHORT).show()
+                    if (models.isEmpty()) {
+                        status.text = if (provider == "custom") "בספק מותאם יש להזין מזהה מודל ידנית." else "לא נמצאו מודלים זמינים."
+                        return@runOnUiThread
                     }
+                    status.text = "נמצאו " + models.size + " מודלים זמינים. בחר אחד מהרשימה."
+                    val labels = models.map { it.second + "  •  " + it.first }.toTypedArray()
+                    android.app.AlertDialog.Builder(this)
+                        .setTitle("בחירת מודל")
+                        .setItems(labels) { _, which -> modelField.setText(models[which].first) }
+                        .setNegativeButton("סגור", null)
+                        .show()
                 }
-            } catch(e:Exception) {
+            } catch (e: Exception) {
                 runOnUiThread {
-                    modelStatus.text="לא ניתן לטעון מודלים: " + e.message
-                    Toast.makeText(this,"טעינת המודלים נכשלה",Toast.LENGTH_LONG).show()
+                    status.text = "טעינת המודלים נכשלה: " + (e.message ?: "שגיאה")
                 }
             }
         }.start()
@@ -84,96 +93,198 @@ class SettingsActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor=Color.rgb(234,243,255); window.decorView.systemUiVisibility=android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-        val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(18),dp(18),dp(18)); setBackgroundColor(Color.rgb(244,248,255)) }
-        root.addView(TextView(this).apply { text="הגדרות"; textSize=26f; setTextColor(Color.rgb(20,45,80)); typeface=Typeface.DEFAULT_BOLD; gravity=Gravity.RIGHT })
-        root.addView(TextView(this).apply { text="סוכן הבינה המלאכותית"; textSize=18f; setTextColor(blue); setPadding(0,dp(18),0,dp(8)); gravity=Gravity.RIGHT })
-        val key=EditText(this).apply { hint="מפתח API של Gemini"; text=android.text.SpannableStringBuilder(ApiKeyVault.read(this@SettingsActivity)); inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD; gravity=Gravity.RIGHT; setSingleLine(true) }
-        root.addView(card().apply { addView(TextView(this@SettingsActivity).apply { text="מפתח API"; textSize=14f; setTextColor(Color.DKGRAY); gravity=Gravity.RIGHT }); addView(key) })
-        val prefs=getSharedPreferences("ai_settings",0)
-        var selectedModel=prefs.getString("model",null) ?: "gemini-3.8-flash"
-        if(selectedModel.isBlank() || selectedModel=="gemini-2.0-flash") selectedModel="gemini-3.8-flash"
-        modelSpinner=Spinner(this)
-        modelStatus=TextView(this).apply {
-            text="המודל שנבחר כאן יהיה מודל ברירת המחדל לכל פעולות ה־AI."
-            textSize=12f
-            setTextColor(Color.rgb(85,105,130))
-            gravity=Gravity.RIGHT
-            setPadding(0,dp(6),0,dp(6))
+        window.statusBarColor = Color.rgb(234, 243, 255)
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        val prefs = getSharedPreferences("ai_settings", 0)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutDirection = View.LAYOUT_DIRECTION_RTL
+            setPadding(dp(18), dp(18), dp(18), dp(22))
+            setBackgroundColor(Color.rgb(244, 248, 255))
         }
-        val fallback=listOf(
-            Pair("gemini-3.8-flash","Gemini 3.8 Flash – מומלץ ומהיר"),
-            Pair("gemini-3.6-flash","Gemini 3.6 Flash"),
-            Pair("gemini-3.5-flash-lite","Gemini 3.5 Flash Lite")
-        ).toMutableList()
-        if(fallback.none{it.first==selectedModel}) fallback.add(0,Pair(selectedModel,selectedModel))
-        setModelOptions(fallback,selectedModel)
-        root.addView(card().apply {
-            addView(TextView(this@SettingsActivity).apply { text="מודל ברירת מחדל"; textSize=14f; setTextColor(Color.DKGRAY); gravity=Gravity.RIGHT })
-            addView(modelSpinner)
-            addView(modelStatus)
-            addView(Button(this@SettingsActivity).apply {
-                text="רענן רשימת מודלים מהחשבון"
-                isAllCaps=false
-                setOnClickListener { refreshModels(key.text.toString().trim()) }
-            })
+        root.addView(TextView(this).apply {
+            text = "הגדרות"
+            textSize = 27f
+            setTextColor(Color.rgb(20, 45, 80))
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.RIGHT
         })
+        root.addView(heading("ספקי בינה מלאכותית ומפתחות API"))
+
+        val keys = linkedMapOf<String, EditText>()
+        val providerFields = listOf(
+            Triple("gemini", "Google Gemini API Key", ApiKeyVault.read(this, "gemini")),
+            Triple("openai", "OpenAI API Key", ApiKeyVault.read(this, "openai")),
+            Triple("anthropic", "Anthropic API Key", ApiKeyVault.read(this, "anthropic")),
+            Triple("custom", "מפתח API של ספק מותאם", ApiKeyVault.read(this, "custom"))
+        )
+        root.addView(card().apply {
+            addView(TextView(this@SettingsActivity).apply {
+                text = "המפתחות נשמרים מוצפנים במכשיר באמצעות Android Keystore."
+                textSize = 12f
+                setTextColor(Color.rgb(85, 105, 130))
+                gravity = Gravity.RIGHT
+            })
+            providerFields.forEach { (id, label, value) ->
+                addView(TextView(this@SettingsActivity).apply {
+                    text = label
+                    textSize = 13f
+                    setTextColor(Color.DKGRAY)
+                    gravity = Gravity.RIGHT
+                    setPadding(0, dp(10), 0, 0)
+                })
+                val input = textField(label, value, true)
+                keys[id] = input
+                addView(input)
+            }
+        })
+
+        root.addView(heading("מודל ראשי"))
+        val primaryProvider = providerSpinner(prefs.getString("primary_provider", "gemini") ?: "gemini")
+        val primaryModel = textField(
+            "מזהה מודל ראשי",
+            prefs.getString("primary_model", prefs.getString("model", "gemini-3.8-flash")) ?: "gemini-3.8-flash"
+        )
+        val primaryStatus = TextView(this).apply {
+            text = "בחר ספק ומודל. אפשר לטעון את רשימת המודלים האמיתית מהחשבון."
+            textSize = 12f
+            setTextColor(Color.rgb(85, 105, 130))
+            gravity = Gravity.RIGHT
+        }
+        root.addView(card().apply {
+            addView(TextView(this@SettingsActivity).apply { text = "ספק ראשי"; gravity = Gravity.RIGHT; setTextColor(Color.DKGRAY) })
+            addView(primaryProvider)
+            addView(primaryModel)
+            addView(Button(this@SettingsActivity).apply {
+                text = "טען מודלים זמינים ובחר"
+                isAllCaps = false
+                setOnClickListener {
+                    val provider = selectedProvider(primaryProvider)
+                    refreshModelList(provider, keys[provider]?.text?.toString()?.trim().orEmpty(), primaryModel, primaryStatus)
+                }
+            })
+            addView(primaryStatus)
+        })
+
+        root.addView(heading("מודל גיבוי אוטומטי"))
+        val fallbackProvider = providerSpinner(prefs.getString("fallback_provider", "gemini") ?: "gemini")
+        val fallbackModel = textField(
+            "מזהה מודל גיבוי",
+            prefs.getString("fallback_model", "gemini-3.7-flash") ?: "gemini-3.7-flash"
+        )
+        val fallbackStatus = TextView(this).apply {
+            text = "כאשר המודל הראשי עמוס או מחזיר שגיאת שרת זמנית, האפליקציה תנסה את מודל הגיבוי."
+            textSize = 12f
+            setTextColor(Color.rgb(85, 105, 130))
+            gravity = Gravity.RIGHT
+        }
+        val extraModels = textField(
+            "מודלי גיבוי נוספים, מופרדים בפסיקים",
+            prefs.getString("extra_fallback_models", "") ?: ""
+        )
+        root.addView(card().apply {
+            addView(TextView(this@SettingsActivity).apply { text = "ספק גיבוי"; gravity = Gravity.RIGHT; setTextColor(Color.DKGRAY) })
+            addView(fallbackProvider)
+            addView(fallbackModel)
+            addView(Button(this@SettingsActivity).apply {
+                text = "טען מודלי גיבוי זמינים"
+                isAllCaps = false
+                setOnClickListener {
+                    val provider = selectedProvider(fallbackProvider)
+                    refreshModelList(provider, keys[provider]?.text?.toString()?.trim().orEmpty(), fallbackModel, fallbackStatus)
+                }
+            })
+            addView(fallbackStatus)
+            addView(TextView(this@SettingsActivity).apply {
+                text = "אפשר להוסיף כמה מזהי מודלים מאותו ספק. האפליקציה תנסה אותם לפי הסדר."
+                textSize = 12f
+                setTextColor(Color.rgb(85, 105, 130))
+                gravity = Gravity.RIGHT
+            })
+            addView(extraModels)
+        })
+
+        root.addView(heading("ספק API מותאם"))
+        val customEndpoint = textField(
+            "כתובת HTTPS מלאה, לדוגמה https://api.example.com/v1/chat/completions",
+            prefs.getString("custom_endpoint", "https://api.openai.com/v1/chat/completions") ?: ""
+        )
+        root.addView(card().apply {
+            addView(TextView(this@SettingsActivity).apply {
+                text = "מאפשר להשתמש בשירותים נוספים שתומכים בממשק OpenAI Chat Completions."
+                textSize = 12f
+                setTextColor(Color.rgb(85, 105, 130))
+                gravity = Gravity.RIGHT
+            })
+            addView(customEndpoint)
+        })
+
         root.addView(Button(this).apply {
-            text="שמירת הגדרות"
-            isAllCaps=false
+            text = "שמירת הגדרות AI"
+            isAllCaps = false
             setOnClickListener {
-                ApiKeyVault.save(this@SettingsActivity,key.text.toString().trim())
-                val chosen=modelIds.getOrNull(modelSpinner.selectedItemPosition) ?: "gemini-3.8-flash"
-                prefs.edit().putString("model",chosen).apply()
-                Toast.makeText(this@SettingsActivity,"ההגדרות נשמרו. מודל ברירת המחדל: " + chosen,Toast.LENGTH_SHORT).show()
+                keys.forEach { (provider, input) ->
+                    ApiKeyVault.save(this@SettingsActivity, input.text.toString().trim(), provider)
+                }
+                val chosenPrimaryProvider = selectedProvider(primaryProvider)
+                val chosenPrimaryModel = primaryModel.text.toString().trim()
+                val chosenFallbackProvider = selectedProvider(fallbackProvider)
+                val chosenFallbackModel = fallbackModel.text.toString().trim()
+                if (chosenPrimaryModel.isBlank() || chosenFallbackModel.isBlank()) {
+                    Toast.makeText(this@SettingsActivity, "יש להגדיר מודל ראשי ומודל גיבוי", Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+                prefs.edit()
+                    .putString("primary_provider", chosenPrimaryProvider)
+                    .putString("primary_model", chosenPrimaryModel)
+                    .putString("model", chosenPrimaryModel)
+                    .putString("fallback_provider", chosenFallbackProvider)
+                    .putString("fallback_model", chosenFallbackModel)
+                    .putString("extra_fallback_models", extraModels.text.toString().trim())
+                    .putString("custom_endpoint", customEndpoint.text.toString().trim())
+                    .apply()
+                Toast.makeText(this@SettingsActivity, "הגדרות AI נשמרו", Toast.LENGTH_SHORT).show()
                 finish()
             }
         })
-        root.addView(TextView(this).apply { text="פקודות מוכנות"; textSize=20f; setTextColor(blue); gravity=Gravity.RIGHT; setPadding(0,dp(24),0,dp(8)) })
-        val presets=listOf(
-            "הצגת פרטי המכשיר" to "getprop",
-            "גרסת Android" to "getprop ro.build.version.release",
-            "דגם המכשיר" to "getprop ro.product.model",
-            "רשימת אפליקציות מותקנות" to "pm list packages",
-            "אפליקציות מערכת" to "pm list packages -s",
-            "אפליקציות משתמש" to "pm list packages -3",
-            "נפח אחסון" to "df -h",
-            "זיכרון RAM" to "cat /proc/meminfo",
-            "מצב סוללה" to "dumpsys battery",
-            "רזולוציית מסך" to "wm size",
-            "צפיפות מסך" to "wm density",
-            "כתובת IP" to "ip addr",
-            "רשת Wi-Fi" to "dumpsys wifi",
-            "תהליכים פעילים" to "ps -A",
-            "שימוש בסוללה" to "dumpsys batterystats",
-            "הפעלת מצב כהה" to "cmd uimode night yes",
-            "כיבוי מצב כהה" to "cmd uimode night no",
-            "הצגת שירותים" to "service list",
-            "יומן מערכת אחרון" to "logcat -d -t 200",
-            "רשימת משתמשים" to "pm list users",
-            "בדיקת הרשאות" to "dumpsys package",
-            "ניקוי מטמון DNS" to "ndc resolver flushdefaultif"
-        )
-        presets.forEach { (title, cmd) ->
-            val item = TextView(this).apply {
-                text = "$title\n$cmd"
-                textSize = 14f
-                setTextColor(Color.rgb(30,55,85))
+
+        root.addView(heading("יצירת מפתח Gemini"))
+        root.addView(card().apply {
+            addView(TextView(this@SettingsActivity).apply {
+                text = "אפשר ליצור או לנהל מפתח API אישי ב־Google AI Studio."
+                textSize = 13f
+                setTextColor(Color.rgb(65, 85, 110))
                 gravity = Gravity.RIGHT
-                setPadding(dp(12),dp(12),dp(12),dp(12))
-                background = GradientDrawable().apply {
-                    setColor(Color.WHITE)
-                    cornerRadius = dp(12).toFloat()
-                }
+            })
+            addView(Button(this@SettingsActivity).apply {
+                text = "פתיחת Google AI Studio – יצירת API Key"
+                isAllCaps = false
                 setOnClickListener {
-                    getSharedPreferences("quick_command",0).edit().putString("command",cmd).apply()
-                    Toast.makeText(this@SettingsActivity,"הפקודה נשמרה. חזור למסך הראשי כדי להריץ אותה.",Toast.LENGTH_SHORT).show()
-                    finish()
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/app/apikey")))
                 }
-            }
-            root.addView(item)
-            root.addView(Space(this).apply { minimumHeight = dp(7) })
-        }
-        val scroll=ScrollView(this).apply { addView(root) }; setContentView(scroll)
+            })
+        })
+
+        root.addView(heading("אודות"))
+        root.addView(card().apply {
+            addView(TextView(this@SettingsActivity).apply {
+                text = "האפליקציה פותחה על ידי @האמריקאי מפורום מתמחים טופ."
+                textSize = 15f
+                setTextColor(Color.rgb(35, 55, 80))
+                gravity = Gravity.RIGHT
+            })
+            addView(Button(this@SettingsActivity).apply {
+                text = "לפרופיל @האמריקאי במתמחים טופ"
+                isAllCaps = false
+                setOnClickListener {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://mitmachim.top/user/%D7%94%D7%90%D7%9E%D7%A8%D7%99%D7%A7%D7%90%D7%99")))
+                }
+            })
+        })
+
+        setContentView(ScrollView(this).apply {
+            isFillViewport = true
+            addView(root)
+        })
     }
 }
