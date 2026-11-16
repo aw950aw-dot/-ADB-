@@ -77,14 +77,14 @@ class MainActivity : AppCompatActivity() {
         addSpace()
         root.addView(panel().apply {
             addView(label("פקודת ADB ידנית",18f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
-            command=EditText(this@MainActivity).apply { hint="הקלד פקודה…"; singleLine=true; textDirection=View.TEXT_DIRECTION_LTR }
+            command=EditText(this@MainActivity).apply { hint="הקלד פקודה…"; setSingleLine(true); textDirection=View.TEXT_DIRECTION_LTR }
             addView(command)
             addView(button("בצע פקודה"){ runCommand(command.text.toString()) })
         })
         addSpace()
         root.addView(panel().apply {
             addView(label("פלט המסוף",18f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
-            output=label("הפלט יופיע כאן",12f).apply { textIsSelectable=true; textDirection=View.TEXT_DIRECTION_LTR; gravity=Gravity.LEFT }
+            output=label("הפלט יופיע כאן",12f).apply { setTextIsSelectable(true); textDirection=View.TEXT_DIRECTION_LTR; gravity=Gravity.LEFT }
             addView(ScrollView(this@MainActivity).apply { addView(output); layoutParams=LinearLayout.LayoutParams(-1,dp(180)) })
             addView(button("נקה פלט"){ vm.clearOutputText() })
             addView(button("היסטוריית פקודות"){ showHistory() })
