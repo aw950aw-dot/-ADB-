@@ -87,11 +87,18 @@ class MainActivity : AppCompatActivity() {
             output=label("הפלט יופיע כאן",12f).apply { textIsSelectable=true; textDirection=View.TEXT_DIRECTION_LTR; gravity=Gravity.LEFT }
             addView(ScrollView(this@MainActivity).apply { addView(output); layoutParams=LinearLayout.LayoutParams(-1,dp(180)) })
             addView(button("נקה פלט"){ vm.clearOutputText() })
+            addView(button("היסטוריית פקודות"){ showHistory() })
         })
         setContentView(ScrollView(this).apply { isFillViewport=true; addView(root) })
         vm.outputText.observe(this){ output.text=it.ifBlank{"ממתין לפלט…"} }
         vm.adb.running.observe(this){ ready-> status.text=if(ready==true)"מחובר ומוכן לפקודות" else "לא מחובר – הפעל ניפוי באגים אלחוטי"; status.setTextColor(if(ready==true)Color.rgb(20,140,80) else Color.rgb(190,90,35)) }
         if(vm.needsToPair()) showPairDialog() else vm.startADBServer()
+    }
+    override fun onResume(){ super.onResume(); val p=getSharedPreferences("quick_command",0); val pending=p.getString("command",null); if(!pending.isNullOrBlank()){ p.edit().remove("command").apply(); runCommand(pending) } }
+    private fun showHistory(){
+        val items=getSharedPreferences("command_history",0).getString("items","")!!.split("\\n").filter{it.isNotBlank()}
+        if(items.isEmpty()){ Toast.makeText(this,"עדיין אין פקודות בהיסטוריה",Toast.LENGTH_SHORT).show(); return }
+        AlertDialog.Builder(this).setTitle("פקודות אחרונות").setItems(items.toTypedArray()){_,which-> command.setText(items[which]); command.setSelection(command.text.length) }.setNegativeButton("סגור",null).show()
     }
     private fun runCommand(cmd:String){ if(cmd.isBlank())return; if(vm.adb.running.value!=true){ Toast.makeText(this,"תחילה יש להתחבר ל־ADB",Toast.LENGTH_SHORT).show(); return }; saveHistory(cmd); vm.adb.sendToShellProcess(cmd); command.setText("") }
     private fun saveHistory(cmd:String){ val p=getSharedPreferences("command_history",0); val old=p.getString("items","")!!.split("\n").filter{it.isNotBlank()}; p.edit().putString("items",(listOf(cmd)+old).distinct().take(80).joinToString("\n")).apply() }
