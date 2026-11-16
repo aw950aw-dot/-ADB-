@@ -18,8 +18,10 @@ import androidx.preference.PreferenceManager
 import androidx.core.content.edit
 import com.draco.ladb.R
 import com.draco.ladb.utils.ApiKeyVault
+import com.draco.ladb.utils.AiProviderClient
 import com.draco.ladb.viewmodels.MainActivityViewModel
 import androidx.activity.viewModels
+import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.material.textfield.TextInputEditText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -34,11 +36,15 @@ class MainActivity : AppCompatActivity() {
     private val blue=Color.rgb(23,105,210)
     private lateinit var root: LinearLayout
     private lateinit var status: TextView
+    private lateinit var connectionSpinner: ProgressBar
     private lateinit var output: TextView
     private lateinit var outputScroll: ScrollView
     private var pendingPresetCommand: String? = null
     private lateinit var command: EditText
     private lateinit var aiRequest: EditText
+    private val apkPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (!uris.isNullOrEmpty()) installSelectedApks(uris)
+    }
     private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
     private fun panel(): LinearLayout=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(14),dp(16),dp(14)); background=GradientDrawable().apply { setColor(Color.WHITE); cornerRadius=dp(18).toFloat(); setStroke(dp(1),Color.rgb(225,235,248)) } }
     private fun label(s:String,size:Float=15f):TextView=TextView(this).apply { text=s; textSize=size; setTextColor(Color.rgb(25,48,78)); gravity=Gravity.RIGHT }
@@ -47,22 +53,55 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState:Bundle?){ super.onCreate(savedInstanceState)
         window.statusBarColor=Color.rgb(234,243,255); window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
         root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(16),dp(16),dp(22)); layoutDirection=View.LAYOUT_DIRECTION_RTL; setBackgroundColor(Color.rgb(244,248,255)) }
-        root.addView(label("ADB חכם",28f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
-        root.addView(label("כלי ADB פשוטים, מהירים ובעברית",14f))
+        root.addView(LinearLayout(this).apply {
+            orientation=LinearLayout.HORIZONTAL
+            layoutDirection=View.LAYOUT_DIRECTION_RTL
+            gravity=Gravity.CENTER_VERTICAL
+            addView(button("⚙"){ startActivity(Intent(this@MainActivity,SettingsActivity::class.java)) },
+                LinearLayout.LayoutParams(dp(58),dp(52)).apply { setMargins(0,0,dp(8),0) })
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation=LinearLayout.VERTICAL
+                addView(label("ADB חכם",27f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
+                addView(label("כלי ניהול Android בעברית",13f))
+            },LinearLayout.LayoutParams(0,-2,1f))
+        })
         addSpace()
         root.addView(panel().apply {
             addView(label("מצב החיבור",16f).apply { typeface=Typeface.DEFAULT_BOLD })
-            status=label("מתחבר ל־ADB…",14f); addView(status)
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation=LinearLayout.HORIZONTAL
+                gravity=Gravity.CENTER_VERTICAL
+                layoutDirection=View.LAYOUT_DIRECTION_RTL
+                connectionSpinner=ProgressBar(this@MainActivity).apply { isIndeterminate=true }
+                addView(connectionSpinner,LinearLayout.LayoutParams(dp(28),dp(28)).apply { marginEnd=dp(8) })
+                status=label("מתחבר ל־ADB…",14f)
+                addView(status,LinearLayout.LayoutParams(0,-2,1f))
+            })
             addView(button("התחברות / שיוך מחדש"){ showPairDialog() })
-            addView(button("הגדרות ופקודות מוכנות"){ startActivity(Intent(this@MainActivity,SettingsActivity::class.java)) })
+            addView(button("פקודות מוכנות"){ startActivity(Intent(this@MainActivity,PresetsActivity::class.java)) })
         })
         addSpace()
         root.addView(panel().apply {
             addView(label("ניהול אפליקציות",18f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
-            addView(button("הסרת אפליקציות"){ openAppManager("remove") })
-            addView(button("השבתת אפליקציות מערכת"){ openAppManager("disable") })
-            addView(button("אפליקציות מושבתות – החזרה לפעולה"){ openAppManager("enable") })
-            addView(label("הסרה פועלת עבור המשתמש הנוכחי; השבתה מיועדת לאפליקציות מערכת.",12f))
+            val rows=listOf(
+                listOf("הסרת אפליקציות"){ openAppManager("remove") },
+                listOf("השבתת אפליקציות מערכת"){ openAppManager("disable") },
+                listOf("החזרת אפליקציות מושבתות"){ openAppManager("enable") },
+                listOf("התקנת קובצי APK"){ apkPicker.launch(arrayOf("application/vnd.android.package-archive","application/octet-stream")) }
+            )
+            rows.chunked(2).forEach { pair ->
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation=LinearLayout.HORIZONTAL
+                    pair.forEach { entry ->
+                        val title=entry[0] as String
+                        val action=entry[1] as ()->Unit
+                        addView(tile(title, listOf(Color.rgb(28,125,205),Color.rgb(20,150,135),Color.rgb(109,89,190),Color.rgb(210,126,37))[pair.indexOf(entry) % 4], action),
+                            LinearLayout.LayoutParams(0,dp(78),1f).apply { setMargins(dp(4),dp(4),dp(4),dp(4)) })
+                    }
+                    if(pair.size==1) addView(Space(this@MainActivity),LinearLayout.LayoutParams(0,dp(78),1f))
+                })
+            }
+            addView(label("הסרה של אפליקציות מערכת היא למשתמש הנוכחי בלבד; לא ניתן למחוק את קובץ המערכת עצמו.",11f))
         })
         addSpace()
         root.addView(label("פעולות מהירות",20f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
@@ -76,7 +115,21 @@ class MainActivity : AppCompatActivity() {
             "רזולוציית מסך" to "wm size",
             "ניקוי זיכרון מטמון" to "pm trim-caches 1G"
         )
-        actions.chunked(2).forEach { pair -> root.addView(LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; pair.forEach { (title,cmd)-> addView(button(title){ runCommand(cmd) },LinearLayout.LayoutParams(0,dp(52),1f).apply { setMargins(dp(4),dp(4),dp(4),dp(4)) }) }; if(pair.size==1)addView(Space(this@MainActivity),LinearLayout.LayoutParams(0,1,1f)) }) }
+        actions.chunked(2).forEachIndexed { rowIndex, pair ->
+            root.addView(LinearLayout(this).apply {
+                orientation=LinearLayout.HORIZONTAL
+                pair.forEachIndexed { index, (title,cmd) ->
+                    val color=when((rowIndex*2+index)%4) {
+                        0 -> Color.rgb(28,125,205)
+                        1 -> Color.rgb(20,150,135)
+                        2 -> Color.rgb(109,89,190)
+                        else -> Color.rgb(210,126,37)
+                    }
+                    addView(tile(title,color){ runCommand(cmd) },LinearLayout.LayoutParams(0,dp(82),1f).apply { setMargins(dp(4),dp(4),dp(4),dp(4)) })
+                }
+                if(pair.size==1) addView(Space(this@MainActivity),LinearLayout.LayoutParams(0,dp(82),1f))
+            })
+        }
         addSpace()
         root.addView(panel().apply {
             addView(label("סוכן AI – כתוב מה תרצה לבצע",18f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
@@ -129,8 +182,9 @@ class MainActivity : AppCompatActivity() {
             if(wasAtBottom) outputScroll.post { outputScroll.fullScroll(View.FOCUS_DOWN) }
         }
         vm.adb.running.observe(this){ ready->
-            status.text=if(ready==true)"מחובר ומוכן לפקודות" else "לא מחובר – הפעל ניפוי באגים אלחוטי"
+            status.text=if(ready==true)"מחובר ומוכן לפקודות" else "מתחבר ל־ADB…"
             status.setTextColor(if(ready==true)Color.rgb(20,140,80) else Color.rgb(190,90,35))
+            connectionSpinner.visibility=if(ready==true)View.GONE else View.VISIBLE
             if(ready==true) {
                 val queued=pendingPresetCommand
                 if(!queued.isNullOrBlank()) {
@@ -139,7 +193,9 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        if(vm.needsToPair()) showPairDialog() else vm.startADBServer()
+        val guidePrefs=getSharedPreferences("first_run",0)
+        if(!guidePrefs.getBoolean("guide_shown",false)) showFirstRunGuide() 
+        else if(vm.needsToPair()) showPairDialog() else vm.startADBServer()
     }
     override fun onResume(){
         super.onResume()
@@ -150,6 +206,89 @@ class MainActivity : AppCompatActivity() {
             if(vm.adb.running.value==true) runCommand(pending) else pendingPresetCommand=pending
         }
     }
+    private fun tile(title:String, color:Int, action:()->Unit):TextView = TextView(this).apply {
+        text=title
+        textSize=14f
+        typeface=Typeface.DEFAULT_BOLD
+        gravity=Gravity.CENTER
+        setTextColor(Color.WHITE)
+        setPadding(dp(8),dp(8),dp(8),dp(8))
+        background=GradientDrawable().apply {
+            setColor(color)
+            cornerRadius=dp(16).toFloat()
+        }
+        elevation=dp(2).toFloat()
+        isClickable=true
+        isFocusable=true
+        setOnClickListener { action() }
+    }
+
+    private fun showFirstRunGuide() {
+        val message = "כדי להתחבר בפעם הראשונה:\\n\\n" +
+            "1. פתח הגדרות Android → אודות הטלפון → מספר Build / מספר גרסה. הקש עליו 7 פעמים עד שתופיע הודעה שאפשרויות למפתחים הופעלו. ייתכן שתידרש סיסמת המכשיר.\\n\\n" +
+            "2. חזור להגדרות → מערכת (או הגדרות נוספות) → אפשרויות למפתחים → הפעל ניפוי באגים אלחוטי. אשר את ההודעה.\\n\\n" +
+            "3. בתוך ניפוי באגים אלחוטי בחר 'שיוך מכשיר באמצעות קוד'. בחלון שיופיע קח את מספר הפורט שמופיע אחרי כתובת ה־IP ואת קוד השיוך בן 6 הספרות.\\n\\n" +
+            "4. חזור לכאן והזן את פורט השיוך ואת הקוד. שים לב: זהו פורט השיוך מהחלון הקטן, לא הפורט שמופיע במסך הראשי של ניפוי באגים אלחוטי.\\n\\n" +
+            "5. לאחר השיוך האפליקציה תאתר ותתחבר לפורט ADB האלחוטי. השאר את ניפוי הבאגים האלחוטי פעיל."
+        AlertDialog.Builder(this)
+            .setTitle("ברוך הבא ל־ADB חכם – מדריך התחברות")
+            .setMessage(message)
+            .setPositiveButton("הבנתי, המשך") { _, _ ->
+                getSharedPreferences("first_run",0).edit().putBoolean("guide_shown",true).apply()
+                if(vm.needsToPair()) showPairDialog() else vm.startADBServer()
+            }
+            .setNeutralButton("פתח אודות הטלפון") { _, _ ->
+                getSharedPreferences("first_run",0).edit().putBoolean("guide_shown",true).apply()
+                try { startActivity(Intent(android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS)) } catch (_:Exception) {}
+            }
+            .setNegativeButton("פתח אפשרויות למפתחים") { _, _ ->
+                getSharedPreferences("first_run",0).edit().putBoolean("guide_shown",true).apply()
+                try { startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) } catch (_:Exception) {}
+            }
+            .setCancelable(false)
+            .show()
+    }
+
+    private fun installSelectedApks(uris:List<android.net.Uri>) {
+        if(vm.adb.running.value!=true) {
+            Toast.makeText(this,"יש להתחבר ל־ADB לפני התקנת קובצי APK",Toast.LENGTH_LONG).show()
+            return
+        }
+        val progress=ProgressDialog.show(this,"התקנת אפליקציות","מעתיק ומתקין "+uris.size+" קבצים…",true,false)
+        lifecycleScope.launch {
+            val report=withContext(Dispatchers.IO) {
+                val results=mutableListOf<String>()
+                uris.forEachIndexed { index, uri ->
+                    var temp:java.io.File?=null
+                    try {
+                        val name=contentResolver.query(uri,null,null,null,null)?.use { cursor ->
+                            val col=cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            if(col>=0 && cursor.moveToFirst()) cursor.getString(col) else null
+                        } ?: "selected_"+(index+1)+".apk"
+                        if(!name.endsWith(".apk",true)) throw IllegalArgumentException("הקובץ אינו APK: "+name)
+                        temp=java.io.File.createTempFile("adb-install-"+index+"-",".apk",cacheDir)
+                        contentResolver.openInputStream(uri)?.use { input ->
+                            temp.outputStream().use { output -> input.copyTo(output) }
+                        } ?: throw IllegalStateException("לא ניתן לקרוא את הקובץ")
+                        val output=vm.adb.installApk(temp)
+                        results.add("✓ "+name+": "+output)
+                    } catch(e:Exception) {
+                        results.add("✗ "+uri.lastPathSegment+": "+(e.message ?: "שגיאה"))
+                    } finally {
+                        temp?.delete()
+                    }
+                }
+                results.joinToString("\\n")
+            }
+            progress.dismiss()
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle("תוצאות התקנת APK")
+                .setMessage(report)
+                .setPositiveButton("סגור",null)
+                .show()
+        }
+    }
+
     private fun openAppManager(mode:String) {
         startActivity(Intent(this,AppManagerActivity::class.java).putExtra("mode",mode))
     }
