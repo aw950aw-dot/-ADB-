@@ -49,7 +49,26 @@ class SettingsActivity : Activity() {
             "בדיקת הרשאות" to "dumpsys package",
             "ניקוי מטמון DNS" to "ndc resolver flushdefaultif"
         )
-        presets.forEach { (title,cmd) -> root.addView(TextView(this).apply { text="$title\n$cmd"; textSize=14f; setTextColor(Color.rgb(30,55,85)); gravity=Gravity.RIGHT; setPadding(dp(12),dp(12),dp(12),dp(12)); background=GradientDrawable().apply { setColor(Color.WHITE); cornerRadius=dp(12).toFloat() }; setOnClickListener { getSharedPreferences("quick_command",0).edit().putString("command",cmd).apply(); Toast.makeText(this@SettingsActivity,"הפקודה נשמרה. חזור למסך הראשי כדי להריץ אותה.",Toast.LENGTH_SHORT).show() } } .also { root.addView(Space(this).apply { minimumHeight=dp(7) }) } }
+        presets.forEach { (title, cmd) ->
+            val item = TextView(this).apply {
+                text = "$title\n$cmd"
+                textSize = 14f
+                setTextColor(Color.rgb(30,55,85))
+                gravity = Gravity.RIGHT
+                setPadding(dp(12),dp(12),dp(12),dp(12))
+                background = GradientDrawable().apply {
+                    setColor(Color.WHITE)
+                    cornerRadius = dp(12).toFloat()
+                }
+                setOnClickListener {
+                    getSharedPreferences("quick_command",0).edit().putString("command",cmd).apply()
+                    Toast.makeText(this@SettingsActivity,"הפקודה נשמרה. חזור למסך הראשי כדי להריץ אותה.",Toast.LENGTH_SHORT).show()
+                    finish()
+                }
+            }
+            root.addView(item)
+            root.addView(Space(this).apply { minimumHeight = dp(7) })
+        }
         val scroll=ScrollView(this).apply { addView(root) }; setContentView(scroll)
     }
 }
