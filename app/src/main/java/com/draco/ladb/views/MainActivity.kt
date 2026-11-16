@@ -1,5 +1,6 @@
 package com.draco.ladb.views
 
+import android.app.ProgressDialog
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
@@ -83,19 +84,18 @@ class MainActivity : AppCompatActivity() {
         addSpace()
         root.addView(panel().apply {
             addView(label("ניהול אפליקציות",18f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
-            val rows=listOf(
-                listOf("הסרת אפליקציות"){ openAppManager("remove") },
-                listOf("השבתת אפליקציות מערכת"){ openAppManager("disable") },
-                listOf("החזרת אפליקציות מושבתות"){ openAppManager("enable") },
-                listOf("התקנת קובצי APK"){ apkPicker.launch(arrayOf("application/vnd.android.package-archive","application/octet-stream")) }
+            val rows = listOf<Pair<String, () -> Unit>>(
+                "הסרת אפליקציות" to { openAppManager("remove") },
+                "השבתת אפליקציות מערכת" to { openAppManager("disable") },
+                "החזרת אפליקציות מושבתות" to { openAppManager("enable") },
+                "התקנת קובצי APK" to { apkPicker.launch(arrayOf("application/vnd.android.package-archive","application/octet-stream")) }
             )
-            rows.chunked(2).forEach { pair ->
+            rows.chunked(2).forEachIndexed { rowIndex, pair ->
                 addView(LinearLayout(this@MainActivity).apply {
                     orientation=LinearLayout.HORIZONTAL
-                    pair.forEach { entry ->
-                        val title=entry[0] as String
-                        val action=entry[1] as ()->Unit
-                        addView(tile(title, listOf(Color.rgb(28,125,205),Color.rgb(20,150,135),Color.rgb(109,89,190),Color.rgb(210,126,37))[pair.indexOf(entry) % 4], action),
+                    pair.forEachIndexed { index, entry ->
+                        val color = listOf(Color.rgb(28,125,205),Color.rgb(20,150,135),Color.rgb(109,89,190),Color.rgb(210,126,37))[(rowIndex*2+index)%4]
+                        addView(tile(entry.first,color,entry.second),
                             LinearLayout.LayoutParams(0,dp(78),1f).apply { setMargins(dp(4),dp(4),dp(4),dp(4)) })
                     }
                     if(pair.size==1) addView(Space(this@MainActivity),LinearLayout.LayoutParams(0,dp(78),1f))
@@ -266,11 +266,12 @@ class MainActivity : AppCompatActivity() {
                             if(col>=0 && cursor.moveToFirst()) cursor.getString(col) else null
                         } ?: "selected_"+(index+1)+".apk"
                         if(!name.endsWith(".apk",true)) throw IllegalArgumentException("הקובץ אינו APK: "+name)
-                        temp=java.io.File.createTempFile("adb-install-"+index+"-",".apk",cacheDir)
+                        val targetFile=java.io.File.createTempFile("adb-install-"+index+"-",".apk",cacheDir)
+                        temp=targetFile
                         contentResolver.openInputStream(uri)?.use { input ->
-                            temp.outputStream().use { output -> input.copyTo(output) }
+                            targetFile.outputStream().use { output -> input.copyTo(output) }
                         } ?: throw IllegalStateException("לא ניתן לקרוא את הקובץ")
-                        val output=vm.adb.installApk(temp)
+                        val output=vm.adb.installApk(targetFile)
                         results.add("✓ "+name+": "+output)
                     } catch(e:Exception) {
                         results.add("✗ "+uri.lastPathSegment+": "+(e.message ?: "שגיאה"))
