@@ -119,7 +119,7 @@ class MainActivity : AppCompatActivity() {
             aiRequest.isEnabled=true
             if(result.startsWith("ERROR:")){ AlertDialog.Builder(this@MainActivity).setTitle("שגיאת AI").setMessage(result.removePrefix("ERROR:")).setPositiveButton("אישור",null).show(); return@launch }
             if(result=="NEEDS_CLARIFICATION"){ Toast.makeText(this@MainActivity,"הבקשה דורשת הבהרה או פעולה בטוחה יותר",Toast.LENGTH_LONG).show(); return@launch }
-            AlertDialog.Builder(this@MainActivity).setTitle("פקודה שהסוכן הכין").setMessage(result).setNegativeButton("ביטול",null).setNeutralButton("העתק"){_,_-> command.setText(result); android.content.ClipboardManager::class.java }.setPositiveButton("בצע"){_,_-> runCommand(result) }.show()
+            AlertDialog.Builder(this@MainActivity).setTitle("פקודה שהסוכן הכין").setMessage(result).setNegativeButton("ביטול",null).setNeutralButton("העתק"){_,_-> (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("ADB",result)); Toast.makeText(this@MainActivity,"הפקודה הועתקה",Toast.LENGTH_SHORT).show() }.setPositiveButton("בצע"){_,_-> runCommand(result) }.show()
         }
     }
     private fun showPairDialog(){
