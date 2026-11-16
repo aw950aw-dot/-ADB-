@@ -20,7 +20,7 @@ class SettingsActivity : Activity() {
         root.addView(TextView(this).apply { text="הגדרות"; textSize=26f; setTextColor(Color.rgb(20,45,80)); typeface=Typeface.DEFAULT_BOLD; gravity=Gravity.RIGHT })
         root.addView(TextView(this).apply { text="סוכן הבינה המלאכותית"; textSize=18f; setTextColor(blue); setPadding(0,dp(18),0,dp(8)); gravity=Gravity.RIGHT })
         val key=EditText(this).apply { hint="מפתח API של Gemini"; text=android.text.SpannableStringBuilder(ApiKeyVault.read(this@SettingsActivity)); inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD; gravity=Gravity.RIGHT; setSingleLine(true) }
-        root.addView(card().apply { addView(TextView(this@SettingsActivity).apply { text="מפתח API"; textSize=14f; setTextColor(Color.DKGRAY;); gravity=Gravity.RIGHT }); addView(key) })
+        root.addView(card().apply { addView(TextView(this@SettingsActivity).apply { text="מפתח API"; textSize=14f; setTextColor(Color.DKGRAY); gravity=Gravity.RIGHT }); addView(key) })
         val model=EditText(this).apply { hint="מודל Gemini"; setText("gemini-2.0-flash"); gravity=Gravity.RIGHT; setSingleLine(true) }
         root.addView(model)
         root.addView(Button(this).apply { text="שמירת הגדרות"; setOnClickListener { ApiKeyVault.save(this@SettingsActivity,key.text.toString().trim()); getSharedPreferences("ai_settings",0).edit().putString("model",model.text.toString().trim()).apply(); Toast.makeText(this@SettingsActivity,"ההגדרות נשמרו",Toast.LENGTH_SHORT).show(); finish() } })
