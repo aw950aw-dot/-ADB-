@@ -20,6 +20,8 @@ import java.io.File
 
 class MainActivityViewModel(application: Application) : AndroidViewModel(application) {
     private val _outputText = MutableLiveData<String>()
+    @Volatile private var outputStartOffset = 0L
+    private val maxVisibleOutputBytes = 512 * 1024
     val outputText: LiveData<String> = _outputText
 
     val isPairing = MutableLiveData<Boolean>()
@@ -85,7 +87,11 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
      * Erase all shell text
      */
     fun clearOutputText() {
-        adb.outputBufferFile.writeText("")
+        // Keep the file descriptor used by the long-running ADB shell intact.
+        synchronized(adb.outputBufferFile) {
+            outputStartOffset = if (adb.outputBufferFile.exists()) adb.outputBufferFile.length() else 0L
+        }
+        _outputText.postValue("")
     }
 
     /**
@@ -109,24 +115,23 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
      * Read the content of the ABD output file
      */
     private fun readOutputFile(file: File): String {
-        val out = ByteArray(adb.getOutputBufferSize())
-
         synchronized(file) {
-            if (!file.exists())
-                return ""
-
-            file.inputStream().use {
-                val size = it.channel.size()
-
-                if (size <= out.size)
-                    return String(it.readBytes())
-
-                val newPos = (it.channel.size() - out.size)
-                it.channel.position(newPos)
-                it.read(out)
+            if (!file.exists()) return ""
+            val size = file.length()
+            if (outputStartOffset > size) outputStartOffset = 0L
+            val requestedStart = outputStartOffset
+            val start = maxOf(requestedStart, size - maxVisibleOutputBytes)
+            val length = (size - start).coerceAtLeast(0L).coerceAtMost(maxVisibleOutputBytes.toLong()).toInt()
+            if (length == 0) return ""
+            val bytes = ByteArray(length)
+            java.io.RandomAccessFile(file, "r").use { input ->
+                input.seek(start)
+                input.readFully(bytes)
             }
+            val content = String(bytes, Charsets.UTF_8)
+            return if (start > requestedStart) {
+                "… הפלט הישן קוצר כדי לשמור על תגובה מהירה. אפשר לנקות פלט ולהתחיל מחדש. …\n$content"
+            } else content
         }
-
-        return String(out)
     }
 }
