@@ -164,7 +164,7 @@ class AppManagerActivity : AppCompatActivity() {
         val command = when (mode) {
             Mode.REMOVE -> "pm uninstall --user 0 ${entry.packageName}"
             Mode.DISABLE -> "pm disable-user --user 0 ${entry.packageName}"
-            Mode.ENABLE -> "pm enable ${entry.packageName}"
+            Mode.ENABLE -> "pm enable --user 0 ${entry.packageName}"
         }
         adb.sendToShellProcess(command)
         Toast.makeText(this, "הפקודה נשלחה ל־ADB. בדוק את הפלט במסך הראשי.", Toast.LENGTH_LONG).show()
