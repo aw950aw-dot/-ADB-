@@ -65,7 +65,7 @@ class MainActivity : AppCompatActivity() {
             "רזולוציית מסך" to "wm size",
             "ניקוי זיכרון מטמון" to "pm trim-caches 1G"
         )
-        actions.chunked(2).forEach { pair -> root.addView(LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; pair.forEach { (title,cmd)-> addView(button(title){ runCommand(cmd) },LinearLayout.LayoutParams(0,dp(52),1f).apply { margin=dp(4) }) }; if(pair.size==1)addView(Space(this@MainActivity),LinearLayout.LayoutParams(0,1,1f)) }) }
+        actions.chunked(2).forEach { pair -> root.addView(LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; pair.forEach { (title,cmd)-> addView(button(title){ runCommand(cmd) },LinearLayout.LayoutParams(0,dp(52),1f).apply { setMargins(dp(4),dp(4),dp(4),dp(4)) }) }; if(pair.size==1)addView(Space(this@MainActivity),LinearLayout.LayoutParams(0,1,1f)) }) }
         addSpace()
         root.addView(panel().apply {
             addView(label("סוכן AI – כתוב מה תרצה לבצע",18f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
