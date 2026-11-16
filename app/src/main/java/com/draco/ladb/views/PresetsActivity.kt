@@ -110,7 +110,7 @@ class PresetsActivity : Activity() {
         })
         search = EditText(this).apply {
             hint = "חיפוש פקודה או קטגוריה…"
-            singleLine = true
+            setSingleLine(true)
             gravity = Gravity.RIGHT
             setPadding(dp(12), dp(8), dp(12), dp(8))
             background = GradientDrawable().apply {
