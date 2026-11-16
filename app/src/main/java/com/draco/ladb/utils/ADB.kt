@@ -409,6 +409,33 @@ class ADB(private val context: Context) {
     }
 
     /**
+     * Install one APK file through the bundled ADB client.
+     */
+    fun installApk(file: File): String {
+        if (!file.exists() || !file.isFile) throw IllegalArgumentException("קובץ APK לא נמצא")
+        if (_running.value != true) throw IllegalStateException("אין חיבור ADB פעיל")
+        val process = ProcessBuilder(adbPath, "install", "-r", file.absolutePath)
+            .directory(context.filesDir)
+            .redirectErrorStream(true)
+            .apply {
+                environment().put("HOME", context.filesDir.path)
+                environment().put("TMPDIR", context.cacheDir.path)
+            }
+            .start()
+        val finished = process.waitFor(120, TimeUnit.SECONDS)
+        if (!finished) {
+            process.destroyForcibly()
+            throw IllegalStateException("התקנת APK חרגה מזמן ההמתנה")
+        }
+        val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+        debug("APK INSTALL: " + file.name + "\n" + output)
+        if (process.exitValue() != 0 || !output.contains("Success", ignoreCase = true)) {
+            throw IllegalStateException(output.ifBlank { "ADB install נכשל" })
+        }
+        return output
+    }
+
+    /**
      * Send a raw ADB command
      */
     private fun adb(redirect: Boolean, command: List<String>): Process {
