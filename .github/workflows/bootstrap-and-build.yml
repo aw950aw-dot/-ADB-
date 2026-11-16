@@ -9,14 +9,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout app overlay
+      - name: Checkout source
         uses: actions/checkout@v4
-      - name: Import LADB engine source
-        run: |
-          git clone --depth 1 https://github.com/tytydraco/LADB.git /tmp/ladb
-          rsync -a --exclude='.git' /tmp/ladb/ ./
-          cp -a .overlay/. ./
-          rm -rf .overlay
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
