@@ -38,6 +38,9 @@ class AppManagerActivity : AppCompatActivity() {
     private lateinit var list: ListView
     private lateinit var subtitle: TextView
     private var entries: List<AppEntry> = emptyList()
+    private var allEntries: List<AppEntry> = emptyList()
+    private lateinit var searchInput: EditText
+    private lateinit var sortSpinner: Spinner
     private val handler = Handler(Looper.getMainLooper())
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
@@ -81,6 +84,33 @@ class AppManagerActivity : AppCompatActivity() {
             }
         }
         root.addView(subtitle)
+        searchInput = EditText(this).apply {
+            hint = "חיפוש לפי שם אפליקציה או package id"
+            singleLine = true
+            textDirection = View.TEXT_DIRECTION_RTL
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = GradientDrawable().apply {
+                setColor(Color.WHITE)
+                cornerRadius = dp(12).toFloat()
+                setStroke(dp(1), Color.rgb(220, 230, 243))
+            }
+        }
+        root.addView(searchInput, LinearLayout.LayoutParams(-1, dp(52)).apply { bottomMargin = dp(8) })
+        sortSpinner = Spinner(this)
+        val sortAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item,
+            listOf("מיון: שם א׳–ת׳", "מיון: שם ת׳–א׳", "מיון: אפליקציות מערכת תחילה", "מיון: מזהה חבילה"))
+        sortAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        sortSpinner.adapter = sortAdapter
+        root.addView(sortSpinner, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(8) })
+        searchInput.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { applyFilterAndSort() }
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        })
+        sortSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) { applyFilterAndSort() }
+        }
         list = ListView(this).apply {
             divider = android.graphics.drawable.ColorDrawable(Color.rgb(220, 230, 243))
             dividerHeight = dp(1)
@@ -107,7 +137,7 @@ class AppManagerActivity : AppCompatActivity() {
         try {
             val pm = packageManager
             val installed = pm.getInstalledApplications(PackageManager.GET_META_DATA or PackageManager.MATCH_DISABLED_COMPONENTS)
-            entries = installed.mapNotNull { info ->
+            allEntries = installed.mapNotNull { info ->
                 val pkg = info.packageName
                 if (pkg == packageName) return@mapNotNull null
                 val flags = info.flags
@@ -124,17 +154,35 @@ class AppManagerActivity : AppCompatActivity() {
                     Mode.DISABLE -> entry.system && !entry.disabled && entry.info.enabled
                     Mode.ENABLE -> entry.disabled
                 }
-            }.sortedWith(compareBy<AppEntry> { it.title.lowercase(Locale.getDefault()) }.thenBy { it.packageName })
-            (list.adapter as AppAdapter).notifyDataSetChanged()
-            subtitle.text = when (mode) {
-                Mode.REMOVE -> "${entries.size} אפליקציות מותקנות • ההסרה היא למשתמש הנוכחי בלבד"
-                Mode.DISABLE -> "${entries.size} אפליקציות מערכת זמינות להשבתה"
-                Mode.ENABLE -> "${entries.size} אפליקציות מושבתות שניתן להחזיר"
             }
+            applyFilterAndSort()
             if (entries.isEmpty()) subtitle.text = subtitle.text.toString() + "\nלא נמצאו אפליקציות ברשימה זו."
         } catch (e: Exception) {
-            subtitle.text = "לא ניתן לקרוא את רשימת האפליקציות: ${e.message}"
+            subtitle.text = "לא ניתן לקרוא את רשימת האפליקציות: " + e.message
         }
+    }
+
+    private fun applyFilterAndSort() {
+        if (!::list.isInitialized) return
+        val query = if (::searchInput.isInitialized) searchInput.text.toString().trim().lowercase(Locale.getDefault()) else ""
+        val filtered = allEntries.filter { entry ->
+            query.isBlank() ||
+                entry.title.lowercase(Locale.getDefault()).contains(query) ||
+                entry.packageName.lowercase(Locale.getDefault()).contains(query)
+        }
+        entries = when (if (::sortSpinner.isInitialized) sortSpinner.selectedItemPosition else 0) {
+            1 -> filtered.sortedWith(compareByDescending<AppEntry> { it.title.lowercase(Locale.getDefault()) }.thenBy { it.packageName })
+            2 -> filtered.sortedWith(compareByDescending<AppEntry> { it.system }.thenBy { it.title.lowercase(Locale.getDefault()) })
+            3 -> filtered.sortedBy { it.packageName.lowercase(Locale.getDefault()) }
+            else -> filtered.sortedWith(compareBy<AppEntry> { it.title.lowercase(Locale.getDefault()) }.thenBy { it.packageName })
+        }
+        (list.adapter as? AppAdapter)?.notifyDataSetChanged()
+        val countText = when (mode) {
+            Mode.REMOVE -> entries.size.toString() + " אפליקציות • ההסרה למשתמש הנוכחי בלבד"
+            Mode.DISABLE -> entries.size.toString() + " אפליקציות מערכת זמינות להשבתה"
+            Mode.ENABLE -> entries.size.toString() + " אפליקציות מושבתות שניתן להחזיר"
+        }
+        if (::subtitle.isInitialized && allEntries.isNotEmpty()) subtitle.text = countText
     }
 
     private fun requestAction(entry: AppEntry) {
