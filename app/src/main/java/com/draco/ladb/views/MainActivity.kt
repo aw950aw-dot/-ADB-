@@ -41,6 +41,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var output: TextView
     private lateinit var outputScroll: ScrollView
     private var pendingPresetCommand: String? = null
+    private var pairDialogShowing = false
     private lateinit var command: EditText
     private lateinit var aiRequest: EditText
     private val apkPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -205,6 +206,12 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().remove("command").apply()
             if(vm.adb.running.value==true) runCommand(pending) else pendingPresetCommand=pending
         }
+        val guideShown=getSharedPreferences("first_run",0).getBoolean("guide_shown",false)
+        if(guideShown && vm.needsToPair() && !pairDialogShowing) {
+            window.decorView.post { if(!isFinishing && !pairDialogShowing) showPairDialog() }
+        } else if(guideShown && !vm.needsToPair() && vm.adb.running.value!=true) {
+            vm.startADBServer()
+        }
     }
     private fun tile(title:String, color:Int, action:()->Unit):TextView = TextView(this).apply {
         text=title
@@ -357,30 +364,34 @@ class MainActivity : AppCompatActivity() {
         val appContext=if(matches.isBlank()) {
             "לא נמצאה התאמה מדויקת לשם אפליקציה שהוזכר בבקשה. אל תנחש מזהה חבילה; בקש הבהרה."
         } else {
-            "התאמות מקומיות לשמות אפליקציות מותקנות (שם אפליקציה => package id):\\n" + matches
+            "התאמות מקומיות לשמות אפליקציות מותקנות (שם אפליקציה => package id):\n" + matches
         }
         aiRequest.isEnabled=false
         lifecycleScope.launch {
-            val result=withContext(Dispatchers.IO){
+            val outcome: Pair<AiProviderClient.Answer?, String?> = withContext(Dispatchers.IO) {
                 try {
                     val history=getSharedPreferences("command_history",0).getString("items","") ?: ""
-                    val prompt="אתה מומחה Android ADB. המשתמש מבקש: $request.\\n$appContext\\nהשתמש במזהה החבילה המדויק מהרשימה אם הבקשה מתייחסת לאחת האפליקציות. אל תמציא package id. היסטוריית פקודות: $history. החזר פקודת ADB shell אחת בלבד, ללא Markdown, הסברים או עטיפות. אם חסר מידע חיוני החזר בדיוק NEEDS_CLARIFICATION. אל תייצר פקודות שמוחקות מידע, מאפסות את המכשיר או משביתות רכיבי אבטחה."
-                    AiProviderClient.generate(this@MainActivity,prompt,300).let { it }
-                } catch(e:Exception) { "ERROR: ${e.message}" }
+                    val prompt="אתה מומחה Android ADB. המשתמש מבקש: $request.\n$appContext\nהשתמש במזהה החבילה המדויק מהרשימה אם הבקשה מתייחסת לאחת האפליקציות. אל תמציא package id. היסטוריית פקודות: $history. החזר פקודת ADB shell אחת בלבד, ללא Markdown, הסברים או עטיפות. אם חסר מידע חיוני החזר בדיוק NEEDS_CLARIFICATION. אל תייצר פקודות שמוחקות מידע, מאפסות את המכשיר או משביתות רכיבי אבטחה."
+                    Pair(AiProviderClient.generate(this@MainActivity,prompt,300),null)
+                } catch(e:Exception) {
+                    Pair(null,e.message ?: "שגיאה לא ידועה")
+                }
             }
             aiRequest.isEnabled=true
-            if(result.text.startsWith("ERROR:")){
+            val result=outcome.first
+            if(result==null){
                 AlertDialog.Builder(this@MainActivity).setTitle("שגיאת AI")
-                    .setMessage(result.text.removePrefix("ERROR:")).setPositiveButton("אישור",null).show()
+                    .setMessage(outcome.second ?: "לא ניתן לקבל תשובה מהמודל הראשי או ממודלי הגיבוי.")
+                    .setPositiveButton("אישור",null).show()
                 return@launch
             }
-            val commandText=result.text.trim().removeSurrounding("```").trim()
+            val commandText=result.text.trim()
             if(commandText=="NEEDS_CLARIFICATION"){
                 Toast.makeText(this@MainActivity,"הבקשה דורשת הבהרה. בדוק את שם האפליקציה או פרט נוסף.",Toast.LENGTH_LONG).show()
                 return@launch
             }
             if(result.usedFallback) {
-                Toast.makeText(this@MainActivity,"המודל הראשי עמוס. התשובה התקבלה ממודל הגיבוי ${result.model}.",Toast.LENGTH_LONG).show()
+                Toast.makeText(this@MainActivity,"המודל הראשי עמוס. התשובה התקבלה ממודל גיבוי: ${result.model}.",Toast.LENGTH_LONG).show()
             }
             if(isSafeReadOnlyCommand(commandText)) {
                 runCommand(commandText)
@@ -388,7 +399,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("פקודה מוכנה – נדרש אישור")
-                    .setMessage(commandText + "\\n\\nהפקודה עשויה לשנות נתונים או הגדרות. היא לא תבוצע עד לאישור שלך.")
+                    .setMessage(commandText + "\n\nהפקודה עשויה לשנות נתונים או הגדרות. היא לא תבוצע עד לאישור שלך.")
                     .setNegativeButton("ביטול",null)
                     .setNeutralButton("העתק"){_,_->
                         (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
@@ -434,6 +445,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPairDialog(){
+        if(pairDialogShowing) return
+        pairDialogShowing=true
         // A custom, height-bounded dialog keeps the action buttons visible in split-screen.
         val dialog = android.app.Dialog(this)
         val density = resources.displayMetrics.density
@@ -538,6 +551,7 @@ class MainActivity : AppCompatActivity() {
         container.addView(footer, LinearLayout.LayoutParams(-1, -2))
         dialog.setContentView(container)
         dialog.setCancelable(true)
+        dialog.setOnDismissListener { pairDialogShowing=false }
         dialog.setOnShowListener {
             dialog.window?.apply {
                 setBackgroundDrawableResource(android.R.color.transparent)
