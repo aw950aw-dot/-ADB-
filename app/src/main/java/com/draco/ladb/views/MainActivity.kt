@@ -7,6 +7,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.content.Context
 import android.widget.*
@@ -130,18 +131,125 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private fun showPairDialog(){
-        val view=layoutInflater.inflate(R.layout.dialog_pair,null)
-        val port=view.findViewById<TextInputEditText>(R.id.port); val code=view.findViewById<TextInputEditText>(R.id.code)
-        val dialog=AlertDialog.Builder(this).setTitle("שיוך ניפוי באגים אלחוטי").setMessage("בהגדרות Android פתח ניפוי באגים אלחוטי ← שיוך באמצעות קוד. השאר את החלון פתוח והזן את פרטי השיוך.").setView(view).setNegativeButton("ביטול",null).setPositiveButton("שיוך",null).create()
-        dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            val p=port.text?.toString()?.trim().orEmpty(); val c=code.text?.toString()?.trim().orEmpty()
-            if(p.isBlank()||c.isBlank()){ Toast.makeText(this,"יש למלא פורט וקוד",Toast.LENGTH_SHORT).show(); return@setOnClickListener }
-            dialog.dismiss()
-            lifecycleScope.launch(Dispatchers.IO){
-                val ok=vm.adb.pair(p,c)
-                withContext(Dispatchers.Main){ if(ok){ vm.setPairedBefore(true); vm.startADBServer() } else Toast.makeText(this@MainActivity,"השיוך נכשל. בדוק את הפורט והקוד.",Toast.LENGTH_LONG).show() }
+        // A custom, height-bounded dialog keeps the action buttons visible in split-screen.
+        val dialog = android.app.Dialog(this)
+        val density = resources.displayMetrics.density
+        fun d(value: Int) = (value * density).toInt()
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutDirection = View.LAYOUT_DIRECTION_RTL
+            setPadding(d(20), d(18), d(20), d(12))
+            background = GradientDrawable().apply {
+                setColor(Color.WHITE)
+                cornerRadius = d(18).toFloat()
+                setStroke(d(1), Color.rgb(220, 232, 248))
             }
-        } }
+        }
+
+        container.addView(label("שיוך ניפוי באגים אלחוטי", 20f).apply {
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(blue)
+        })
+
+        val instructions = label(
+            "בהגדרות Android פתח ניפוי באגים אלחוטי ← שיוך באמצעות קוד. השאר את החלון פתוח והזן כאן את הפורט ואת קוד השיוך.",
+            14f
+        ).apply {
+            setPadding(0, d(8), 0, d(10))
+        }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = false
+            clipToPadding = false
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(instructions)
+            })
+        }
+        val portInput = EditText(this).apply {
+            hint = "פורט שיוך (לדוגמה 39953)"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            textDirection = View.TEXT_DIRECTION_LTR
+            gravity = Gravity.CENTER_VERTICAL or Gravity.LEFT
+            setSingleLine(true)
+        }
+        val codeInput = EditText(this).apply {
+            hint = "קוד שיוך בן 6 ספרות"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            textDirection = View.TEXT_DIRECTION_LTR
+            gravity = Gravity.CENTER_VERTICAL or Gravity.LEFT
+            setSingleLine(true)
+        }
+        val fields = scroll.getChildAt(0) as LinearLayout
+        fields.addView(portInput, LinearLayout.LayoutParams(-1, d(56)).apply {
+            bottomMargin = d(10)
+        })
+        fields.addView(codeInput, LinearLayout.LayoutParams(-1, d(56)))
+
+        container.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val footer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutDirection = View.LAYOUT_DIRECTION_RTL
+            setPadding(0, d(10), 0, 0)
+        }
+        val pairButton = Button(this).apply {
+            text = "שיוך"
+            isAllCaps = false
+            setOnClickListener {
+                val p = portInput.text.toString().trim()
+                val c = codeInput.text.toString().trim()
+                if (p.isBlank() || c.length != 6) {
+                    Toast.makeText(this@MainActivity, "יש להזין פורט וקוד שיוך בן 6 ספרות", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                isEnabled = false
+                text = "משייך…"
+                dialog.dismiss()
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val ok = vm.adb.pair(p, c)
+                    withContext(Dispatchers.Main) {
+                        if (ok) {
+                            vm.setPairedBefore(true)
+                            vm.startADBServer()
+                        } else {
+                            Toast.makeText(this@MainActivity, "השיוך נכשל. בדוק שהפורט והקוד עדיין בתוקף ונסה שוב.", Toast.LENGTH_LONG).show()
+                            showPairDialog()
+                        }
+                    }
+                }
+            }
+        }
+        val cancelButton = Button(this).apply {
+            text = "ביטול"
+            isAllCaps = false
+            setOnClickListener { dialog.dismiss() }
+        }
+        footer.addView(pairButton, LinearLayout.LayoutParams(0, d(52), 1f).apply {
+            marginEnd = d(6)
+        })
+        footer.addView(cancelButton, LinearLayout.LayoutParams(0, d(52), 1f).apply {
+            marginStart = d(6)
+        })
+        container.addView(footer, LinearLayout.LayoutParams(-1, -2))
+        dialog.setContentView(container)
+        dialog.setCancelable(true)
+        dialog.setOnShowListener {
+            dialog.window?.apply {
+                setBackgroundDrawableResource(android.R.color.transparent)
+                setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+                val availableWidth = resources.displayMetrics.widthPixels - d(32)
+                val availableHeight = (resources.displayMetrics.heightPixels * 0.82f).toInt()
+                setLayout(minOf(availableWidth, d(520)), minOf(availableHeight, d(560)))
+            }
+        }
         dialog.show()
-    }
-}
+        dialog.window?.apply {
+            setBackgroundDrawableResource(android.R.color.transparent)
+            setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+            val availableWidth = resources.displayMetrics.widthPixels - d(32)
+            val availableHeight = (resources.displayMetrics.heightPixels * 0.82f).toInt()
+            setLayout(minOf(availableWidth, d(520)), minOf(availableHeight, d(560)))
+        }
+    }}
