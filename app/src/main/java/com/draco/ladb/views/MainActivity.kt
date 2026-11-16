@@ -111,7 +111,7 @@ class MainActivity : AppCompatActivity() {
                 isSmoothScrollingEnabled=true
                 isNestedScrollingEnabled=true
                 isVerticalScrollBarEnabled=true
-                addView(output,ScrollView.LayoutParams(-1,-2))
+                addView(output,android.widget.FrameLayout.LayoutParams(-1,-2))
             }
             addView(outputScroll,LinearLayout.LayoutParams(-1,dp(300)))
             addView(button("הסבר את הפלט בעזרת AI"){ explainOutput() })
@@ -160,6 +160,15 @@ class MainActivity : AppCompatActivity() {
     }
     private fun runCommand(cmd:String){ if(cmd.isBlank())return; if(vm.adb.running.value!=true){ Toast.makeText(this,"תחילה יש להתחבר ל־ADB",Toast.LENGTH_SHORT).show(); return }; saveHistory(cmd); vm.adb.sendToShellProcess(cmd); command.setText("") }
     private fun saveHistory(cmd:String){ val p=getSharedPreferences("command_history",0); val old=p.getString("items","")!!.split("\n").filter{it.isNotBlank()}; p.edit().putString("items",(listOf(cmd)+old).distinct().take(80).joinToString("\n")).apply() }
+    private fun selectedGeminiModel(): String {
+        val prefs=getSharedPreferences("ai_settings",0)
+        val saved=prefs.getString("model",null)
+        if(saved.isNullOrBlank() || saved=="gemini-2.0-flash") {
+            prefs.edit().putString("model","gemini-3.8-flash").apply()
+            return "gemini-3.8-flash"
+        }
+        return saved
+    }
     private fun askAi(){
         val request=aiRequest.text.toString().trim(); val key=ApiKeyVault.read(this)
         if(request.isBlank()){ Toast.makeText(this,"כתוב מה תרצה לבצע",Toast.LENGTH_SHORT).show(); return }
@@ -167,10 +176,10 @@ class MainActivity : AppCompatActivity() {
         aiRequest.isEnabled=false
         lifecycleScope.launch {
             val result=withContext(Dispatchers.IO){ try {
-                val model=getSharedPreferences("ai_settings",0).getString("model","gemini-3.8-flash") ?: "gemini-3.8-flash"
-                val url=URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$key")
+                val model=selectedGeminiModel()
+                val url=URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
                 val conn=url.openConnection() as HttpURLConnection
-                conn.requestMethod="POST"; conn.connectTimeout=20000; conn.readTimeout=30000; conn.doOutput=true; conn.setRequestProperty("Content-Type","application/json")
+                conn.requestMethod="POST"; conn.connectTimeout=20000; conn.readTimeout=30000; conn.doOutput=true; conn.setRequestProperty("Content-Type","application/json"); conn.setRequestProperty("x-goog-api-key",key)
                 val history=getSharedPreferences("command_history",0).getString("items","") ?: ""
                 val prompt="אתה מומחה Android ADB. המשתמש מבקש: $request. היסטוריית פקודות קודמות: $history. החזר פקודת shell אחת בלבד שמתאימה ל-ADB shell במכשיר Android. בלי Markdown ובלי הסברים. אל תציע מחיקת מידע, איפוס, השבתת אבטחה או שינוי מסוכן ללא צורך ברור. אם הבקשה מסוכנת או לא ברורה החזר בדיוק: NEEDS_CLARIFICATION"
                 val body=JSONObject().put("contents",org.json.JSONArray().put(JSONObject().put("parts",org.json.JSONArray().put(JSONObject().put("text",prompt))))).put("generationConfig",JSONObject().put("temperature",0.1).put("maxOutputTokens",250))
@@ -204,7 +213,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val result=withContext(Dispatchers.IO) {
                 try {
-                    val model=getSharedPreferences("ai_settings",0).getString("model","gemini-3.8-flash") ?: "gemini-3.8-flash"
+                    val model=selectedGeminiModel()
                     val url=URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
                     val conn=url.openConnection() as HttpURLConnection
                     conn.requestMethod="POST"
