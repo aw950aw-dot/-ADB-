@@ -66,11 +66,11 @@ class ADB(private val context: Context) {
      * Returns the user buffer size if valid, else the default
      */
     fun getOutputBufferSize(): Int {
-        val userValue = sharedPrefs.getString(context.getString(R.string.buffer_size_key), "16384")!!
+        val userValue = sharedPrefs.getString(context.getString(R.string.buffer_size_key), "524288")!!
         return try {
             Integer.parseInt(userValue)
         } catch (_: NumberFormatException) {
-            MAX_OUTPUT_BUFFER_SIZE
+            512 * 1024
         }
     }
 
