@@ -96,7 +96,7 @@ class MainActivity : AppCompatActivity() {
     }
     override fun onResume(){ super.onResume(); val p=getSharedPreferences("quick_command",0); val pending=p.getString("command",null); if(!pending.isNullOrBlank()){ p.edit().remove("command").apply(); runCommand(pending) } }
     private fun showHistory(){
-        val items=getSharedPreferences("command_history",0).getString("items","")!!.split("\\n").filter{it.isNotBlank()}
+        val items=getSharedPreferences("command_history",0).getString("items","")!!.split("\n").filter{it.isNotBlank()}
         if(items.isEmpty()){ Toast.makeText(this,"עדיין אין פקודות בהיסטוריה",Toast.LENGTH_SHORT).show(); return }
         AlertDialog.Builder(this).setTitle("פקודות אחרונות").setItems(items.toTypedArray()){_,which-> command.setText(items[which]); command.setSelection(command.text.length) }.setNegativeButton("סגור",null).show()
     }
