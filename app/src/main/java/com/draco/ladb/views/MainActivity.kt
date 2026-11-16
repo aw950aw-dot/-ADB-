@@ -35,6 +35,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var root: LinearLayout
     private lateinit var status: TextView
     private lateinit var output: TextView
+    private lateinit var outputScroll: ScrollView
+    private var pendingPresetCommand: String? = null
     private lateinit var command: EditText
     private lateinit var aiRequest: EditText
     private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
@@ -53,6 +55,14 @@ class MainActivity : AppCompatActivity() {
             status=label("מתחבר ל־ADB…",14f); addView(status)
             addView(button("התחברות / שיוך מחדש"){ showPairDialog() })
             addView(button("הגדרות ופקודות מוכנות"){ startActivity(Intent(this@MainActivity,SettingsActivity::class.java)) })
+        })
+        addSpace()
+        root.addView(panel().apply {
+            addView(label("ניהול אפליקציות",18f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
+            addView(button("הסרת אפליקציות"){ openAppManager("remove") })
+            addView(button("השבתת אפליקציות מערכת"){ openAppManager("disable") })
+            addView(button("אפליקציות מושבתות – החזרה לפעולה"){ openAppManager("enable") })
+            addView(label("הסרה פועלת עבור המשתמש הנוכחי; השבתה מיועדת לאפליקציות מערכת.",12f))
         })
         addSpace()
         root.addView(label("פעולות מהירות",20f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
@@ -84,18 +94,65 @@ class MainActivity : AppCompatActivity() {
         })
         addSpace()
         root.addView(panel().apply {
-            addView(label("פלט המסוף",18f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
-            output=label("הפלט יופיע כאן",12f).apply { setTextIsSelectable(true); textDirection=View.TEXT_DIRECTION_LTR; gravity=Gravity.LEFT }
-            addView(ScrollView(this@MainActivity).apply { addView(output); layoutParams=LinearLayout.LayoutParams(-1,dp(180)) })
-            addView(button("נקה פלט"){ vm.clearOutputText() })
-            addView(button("היסטוריית פקודות"){ showHistory() })
+            addView(label("פלט ADB",19f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
+            addView(label("אפשר לגלול לאורך כל התוצאה ולבחור טקסט להעתקה.",12f))
+            output=label("הפלט יופיע כאן",12f).apply {
+                setTextIsSelectable(true)
+                textDirection=View.TEXT_DIRECTION_LTR
+                gravity=Gravity.LEFT or Gravity.TOP
+                typeface=Typeface.MONOSPACE
+                setTextColor(Color.rgb(225,239,255))
+                setPadding(dp(14),dp(14),dp(14),dp(14))
+                setLineSpacing(dp(3).toFloat(),1f)
+                background=GradientDrawable().apply { setColor(Color.rgb(19,31,49)); cornerRadius=dp(14).toFloat() }
+            }
+            outputScroll=ScrollView(this@MainActivity).apply {
+                isFillViewport=false
+                isSmoothScrollingEnabled=true
+                isNestedScrollingEnabled=true
+                isVerticalScrollBarEnabled=true
+                addView(output,ScrollView.LayoutParams(-1,-2))
+            }
+            addView(outputScroll,LinearLayout.LayoutParams(-1,dp(300)))
+            addView(button("הסבר את הפלט בעזרת AI"){ explainOutput() })
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation=LinearLayout.HORIZONTAL
+                addView(button("נקה פלט"){ vm.clearOutputText() },LinearLayout.LayoutParams(0,dp(50),1f).apply { setMargins(dp(3),0,dp(3),0) })
+                addView(button("היסטוריית פקודות"){ showHistory() },LinearLayout.LayoutParams(0,dp(50),1f).apply { setMargins(dp(3),0,dp(3),0) })
+            })
         })
         setContentView(ScrollView(this).apply { isFillViewport=true; addView(root) })
-        vm.outputText.observe(this){ output.text=it.ifBlank{"ממתין לפלט…"} }
-        vm.adb.running.observe(this){ ready-> status.text=if(ready==true)"מחובר ומוכן לפקודות" else "לא מחובר – הפעל ניפוי באגים אלחוטי"; status.setTextColor(if(ready==true)Color.rgb(20,140,80) else Color.rgb(190,90,35)) }
+        vm.outputText.observe(this){ value ->
+            val wasAtBottom = outputScroll.childCount == 0 ||
+                outputScroll.scrollY + outputScroll.height >= outputScroll.getChildAt(0).height - dp(48)
+            output.text=value.ifBlank{"ממתין לפלט…"}
+            if(wasAtBottom) outputScroll.post { outputScroll.fullScroll(View.FOCUS_DOWN) }
+        }
+        vm.adb.running.observe(this){ ready->
+            status.text=if(ready==true)"מחובר ומוכן לפקודות" else "לא מחובר – הפעל ניפוי באגים אלחוטי"
+            status.setTextColor(if(ready==true)Color.rgb(20,140,80) else Color.rgb(190,90,35))
+            if(ready==true) {
+                val queued=pendingPresetCommand
+                if(!queued.isNullOrBlank()) {
+                    pendingPresetCommand=null
+                    runCommand(queued)
+                }
+            }
+        }
         if(vm.needsToPair()) showPairDialog() else vm.startADBServer()
     }
-    override fun onResume(){ super.onResume(); val p=getSharedPreferences("quick_command",0); val pending=p.getString("command",null); if(!pending.isNullOrBlank()){ p.edit().remove("command").apply(); runCommand(pending) } }
+    override fun onResume(){
+        super.onResume()
+        val prefs=getSharedPreferences("quick_command",0)
+        val pending=prefs.getString("command",null)
+        if(!pending.isNullOrBlank()) {
+            prefs.edit().remove("command").apply()
+            if(vm.adb.running.value==true) runCommand(pending) else pendingPresetCommand=pending
+        }
+    }
+    private fun openAppManager(mode:String) {
+        startActivity(Intent(this,AppManagerActivity::class.java).putExtra("mode",mode))
+    }
     private fun showHistory(){
         val items=getSharedPreferences("command_history",0).getString("items","")!!.split("\n").filter{it.isNotBlank()}
         if(items.isEmpty()){ Toast.makeText(this,"עדיין אין פקודות בהיסטוריה",Toast.LENGTH_SHORT).show(); return }
@@ -110,7 +167,7 @@ class MainActivity : AppCompatActivity() {
         aiRequest.isEnabled=false
         lifecycleScope.launch {
             val result=withContext(Dispatchers.IO){ try {
-                val model=getSharedPreferences("ai_settings",0).getString("model","gemini-2.0-flash") ?: "gemini-2.0-flash"
+                val model=getSharedPreferences("ai_settings",0).getString("model","gemini-3.8-flash") ?: "gemini-3.8-flash"
                 val url=URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$key")
                 val conn=url.openConnection() as HttpURLConnection
                 conn.requestMethod="POST"; conn.connectTimeout=20000; conn.readTimeout=30000; conn.doOutput=true; conn.setRequestProperty("Content-Type","application/json")
@@ -128,6 +185,57 @@ class MainActivity : AppCompatActivity() {
             if(result.startsWith("ERROR:")){ AlertDialog.Builder(this@MainActivity).setTitle("שגיאת AI").setMessage(result.removePrefix("ERROR:")).setPositiveButton("אישור",null).show(); return@launch }
             if(result=="NEEDS_CLARIFICATION"){ Toast.makeText(this@MainActivity,"הבקשה דורשת הבהרה או פעולה בטוחה יותר",Toast.LENGTH_LONG).show(); return@launch }
             AlertDialog.Builder(this@MainActivity).setTitle("פקודה שהסוכן הכין").setMessage(result).setNegativeButton("ביטול",null).setNeutralButton("העתק"){_,_-> (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("ADB",result)); Toast.makeText(this@MainActivity,"הפקודה הועתקה",Toast.LENGTH_SHORT).show() }.setPositiveButton("בצע"){_,_-> runCommand(result) }.show()
+        }
+    }
+
+    private fun explainOutput() {
+        val response=vm.outputText.value.orEmpty().trim()
+        if(response.isBlank()) {
+            Toast.makeText(this,"אין פלט להסביר. הרץ קודם פקודת ADB.",Toast.LENGTH_SHORT).show()
+            return
+        }
+        val key=ApiKeyVault.read(this)
+        if(key.isBlank()) {
+            Toast.makeText(this,"הוסף מפתח Gemini בהגדרות",Toast.LENGTH_LONG).show()
+            startActivity(Intent(this,SettingsActivity::class.java))
+            return
+        }
+        val prompt="הסבר בעברית פשוטה את תגובת ADB הבאה. פתח בסיכום קצר, הסבר שורות וערכים חשובים, ציין שגיאות או סימני אזהרה והצע מה לבדוק בהמשך. אל תטען שפעולה הצליחה אם הפלט אינו מוכיח זאת. שמור על ניסוח ברור ומעשי.\\n\\nתגובת ADB:\\n"+response.takeLast(14000)
+        lifecycleScope.launch {
+            val result=withContext(Dispatchers.IO) {
+                try {
+                    val model=getSharedPreferences("ai_settings",0).getString("model","gemini-3.8-flash") ?: "gemini-3.8-flash"
+                    val url=URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
+                    val conn=url.openConnection() as HttpURLConnection
+                    conn.requestMethod="POST"
+                    conn.connectTimeout=20000
+                    conn.readTimeout=45000
+                    conn.doOutput=true
+                    conn.setRequestProperty("Content-Type","application/json")
+                    conn.setRequestProperty("x-goog-api-key",key)
+                    val body=JSONObject()
+                        .put("contents",org.json.JSONArray().put(JSONObject().put("parts",org.json.JSONArray().put(JSONObject().put("text",prompt)))))
+                        .put("generationConfig",JSONObject().put("temperature",0.2).put("maxOutputTokens",900))
+                    OutputStreamWriter(conn.outputStream).use{it.write(body.toString())}
+                    val stream=if(conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+                    val raw=stream.bufferedReader().use{it.readText()}
+                    if(conn.responseCode !in 200..299) throw Exception("שגיאת API ${conn.responseCode}: $raw")
+                    JSONObject(raw).getJSONArray("candidates").getJSONObject(0)
+                        .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text").trim()
+                } catch(e:Exception) { "ERROR: ${e.message}" }
+            }
+            if(result.startsWith("ERROR:")) {
+                AlertDialog.Builder(this@MainActivity).setTitle("לא הצלחתי להסביר את הפלט")
+                    .setMessage(result.removePrefix("ERROR:")).setPositiveButton("סגור",null).show()
+            } else {
+                AlertDialog.Builder(this@MainActivity).setTitle("הסבר תגובת ADB")
+                    .setMessage(result)
+                    .setNeutralButton("העתק הסבר"){_,_->
+                        (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                            .setPrimaryClip(android.content.ClipData.newPlainText("הסבר ADB",result))
+                    }
+                    .setPositiveButton("סגור",null).show()
+            }
         }
     }
     private fun showPairDialog(){
