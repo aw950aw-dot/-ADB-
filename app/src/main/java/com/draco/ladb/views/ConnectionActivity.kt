@@ -87,26 +87,11 @@ class ConnectionActivity : AppCompatActivity() {
             pairPanel.visibility = View.VISIBLE
             status.text = "נדרש שיוך ראשוני — אפשר להזין את הקוד בהתראה שמופיעה למעלה"
             showPairingNotification()
-        } else if (getSharedPreferences("pairing_state", MODE_PRIVATE).getBoolean("connect_when_resumed", false)) {
-            pairPanel.visibility = View.GONE
-            status.text = "השיוך הושלם מההתראה. חוזר לחיבור…"
         } else {
             pairPanel.visibility = View.GONE
             startConnection()
         }
         handlePairingReply(intent)
-    }
-
-    override fun onResume() {
-        super.onResume()
-        val pairingState = getSharedPreferences("pairing_state", MODE_PRIVATE)
-        if (pairingState.getBoolean("connect_when_resumed", false) && !pairing) {
-            pairingState.edit().remove("connect_when_resumed").apply()
-            pairPanel.visibility = View.GONE
-            PairingNotification.cancel(this)
-            status.text = "השיוך הושלם. מתחבר ל־ADB…"
-            startConnection()
-        }
     }
 
     override fun onNewIntent(intent: Intent) {
