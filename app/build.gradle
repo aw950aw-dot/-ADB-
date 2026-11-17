@@ -23,8 +23,8 @@ android {
         applicationId "com.aw950aw.adbsmart"
         minSdk 26
         targetSdk 36
-        versionCode 11
-        versionName "1.9.1"
+        versionCode 12
+        versionName "1.9.2"
 
         ndk {
             abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'
@@ -32,7 +32,13 @@ android {
     }
 
     signingConfigs {
+        debug {
+            v1SigningEnabled true
+            v2SigningEnabled true
+        }
         release {
+            v1SigningEnabled true
+            v2SigningEnabled true
             if (hasCompleteReleaseSigning) {
                 storeFile file(releaseStorePath)
                 storePassword releaseStorePassword
