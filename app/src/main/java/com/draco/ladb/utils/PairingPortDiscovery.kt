@@ -11,15 +11,17 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
-/** Finds the Wireless Debugging pairing port advertised by this device over local NSD. */
+data class PairingEndpoint(val host: String, val port: Int)
+
+/** Finds the current device's Wireless Debugging pairing endpoint over local NSD. */
 class PairingPortDiscovery(context: Context) {
     private val manager = context.applicationContext.getSystemService(Context.NSD_SERVICE) as NsdManager
 
     @Suppress("DEPRECATION")
-    fun findPairingPort(timeoutMillis: Long = 25_000L): Int? {
-        val foundPort = AtomicInteger(-1)
+    fun findPairingEndpoint(timeoutMillis: Long = 25_000L): PairingEndpoint? {
+        val foundEndpoint = AtomicReference<PairingEndpoint?>(null)
         val finished = CountDownLatch(1)
         val resolving = AtomicBoolean(false)
         val pending = ConcurrentLinkedQueue<NsdServiceInfo>()
@@ -34,7 +36,7 @@ class PairingPortDiscovery(context: Context) {
 
         lateinit var resolveNext: () -> Unit
         resolveNext = {
-            if (foundPort.get() <= 0 && resolving.compareAndSet(false, true)) {
+            if (foundEndpoint.get() == null && resolving.compareAndSet(false, true)) {
                 val next = pending.poll()
                 if (next == null) {
                     resolving.set(false)
@@ -52,32 +54,29 @@ class PairingPortDiscovery(context: Context) {
                                     val port = serviceInfo.port
                                     val host = serviceInfo.host
                                     if (port in 1..65535 && host != null) {
-                                        val local = localAddresses()
-                                        val belongsToThisDevice =
-                                            host.isLoopbackAddress ||
-                                                local.any { it.address.contentEquals(host.address) }
-
-                                        // Do not select a pairing server advertised by another
-                                        // phone on the same Wi-Fi. Verify the resolved endpoint
-                                        // is one of this device's own addresses and is listening.
-                                        val reachable = if (belongsToThisDevice) {
+                                        val isLocal = host.isLoopbackAddress ||
+                                            localAddresses().any { it.address.contentEquals(host.address) }
+                                        val reachable = if (isLocal) {
                                             runCatching {
                                                 Socket().use { socket ->
-                                                    socket.connect(InetSocketAddress(host, port), 900)
+                                                    socket.connect(InetSocketAddress(host, port), 350)
                                                 }
                                             }.isSuccess
                                         } else {
                                             false
                                         }
 
-                                        if (belongsToThisDevice && reachable) {
-                                            foundPort.set(port)
+                                        if (isLocal && reachable) {
+                                            foundEndpoint.compareAndSet(
+                                                null,
+                                                PairingEndpoint(host.hostAddress, port)
+                                            )
                                             finished.countDown()
                                         }
                                     }
                                 } finally {
                                     resolving.set(false)
-                                    if (foundPort.get() <= 0) resolveNext()
+                                    if (foundEndpoint.get() == null) resolveNext()
                                 }
                             }
                         })
@@ -101,7 +100,7 @@ class PairingPortDiscovery(context: Context) {
             override fun onServiceLost(service: NsdServiceInfo) = Unit
 
             override fun onDiscoveryStopped(serviceType: String) {
-                if (foundPort.get() <= 0) finished.countDown()
+                if (foundEndpoint.get() == null) finished.countDown()
             }
 
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
@@ -118,11 +117,15 @@ class PairingPortDiscovery(context: Context) {
         return try {
             manager.discoverServices("_adb-tls-pairing._tcp.", NsdManager.PROTOCOL_DNS_SD, listener)
             finished.await(timeoutMillis.coerceAtLeast(1_000L), TimeUnit.MILLISECONDS)
-            foundPort.get().takeIf { it in 1..65535 }
+            foundEndpoint.get()
         } catch (_: Exception) {
             null
         } finally {
             runCatching { manager.stopServiceDiscovery(listener) }
         }
     }
+
+    /** Kept for callers that only need the port. */
+    fun findPairingPort(timeoutMillis: Long = 25_000L): Int? =
+        findPairingEndpoint(timeoutMillis)?.port
 }
