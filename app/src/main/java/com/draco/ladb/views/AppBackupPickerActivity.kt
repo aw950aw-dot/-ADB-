@@ -11,7 +11,6 @@ import android.view.View
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -32,11 +31,13 @@ import java.io.File
 class AppBackupPickerActivity : AppCompatActivity() {
     private val adb by lazy { ADB.getInstance(this) }
     private val palette get() = UiTheme.palette(this)
-    private lateinit var appList: LinearLayout
+    private lateinit var appList: android.widget.ListView
     private lateinit var search: EditText
     private lateinit var includeSystem: Switch
     private lateinit var count: TextView
     private var apps: List<AppBackupManager.AppItem> = emptyList()
+    private var filteredApps: List<AppBackupManager.AppItem> = emptyList()
+    private var loadError: String? = null
     private var pendingPackage: String? = null
     private var reloadGeneration = 0
     private val iconCache = object : android.util.LruCache<String, android.graphics.drawable.Drawable>(72) {}
@@ -76,15 +77,6 @@ class AppBackupPickerActivity : AppCompatActivity() {
             setBackgroundColor(palette.background)
         }
 
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            clipToPadding = false
-            isVerticalScrollBarEnabled = true
-            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-        }
-        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll.addView(content)
-
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -93,9 +85,9 @@ class AppBackupPickerActivity : AppCompatActivity() {
             LinearLayout.LayoutParams(dp(42), dp(42)))
         header.addView(text("בחר אפליקציה לגיבוי", 20, palette.text, true),
             LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(10) })
-        content.addView(header)
+        root.addView(header)
 
-        content.addView(text(
+        root.addView(text(
             "לחץ על האפליקציה הרצויה כדי ליצור לה קובץ ZIP.",
             13, palette.muted, false
         ).apply { setPadding(0, dp(9), 0, dp(15)) })
@@ -110,7 +102,7 @@ class AppBackupPickerActivity : AppCompatActivity() {
             setPadding(dp(14), 0, dp(14), 0)
             background = rounded(palette.inputBackground, dp(13), palette.outline)
         }
-        content.addView(search, LinearLayout.LayoutParams(-1, dp(49)))
+        root.addView(search, LinearLayout.LayoutParams(-1, dp(49)))
         search.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -134,16 +126,20 @@ class AppBackupPickerActivity : AppCompatActivity() {
             setOnCheckedChangeListener { _, _ -> reloadApps() }
         }
         filters.addView(includeSystem)
-        content.addView(filters)
+        root.addView(filters)
 
-        appList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        content.addView(appList, LinearLayout.LayoutParams(-1, -2))
-        content.addView(text(
-            "הרשימה כולה נמצאת בתוך גלילה אחת, כך שאפשר להגיע עד סוף רשימת האפליקציות.",
-            11, palette.muted, false
-        ).apply { setPadding(0, dp(14), 0, 0) })
+        appList = android.widget.ListView(this).apply {
+            divider = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
+            dividerHeight = dp(8)
+            cacheColorHint = Color.TRANSPARENT
+            isFastScrollEnabled = true
+            isVerticalScrollBarEnabled = true
+            adapter = AppAdapter()
+        }
+        root.addView(appList, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(text("בחר אפליקציה ליצירת גיבוי ZIP.", 11, palette.muted, false)
+            .apply { setPadding(0, dp(8), 0, 0) })
 
-        root.addView(scroll, LinearLayout.LayoutParams(-1, -1))
         setContentView(root)
         UiComponents.applySystemBars(this, root, palette)
     }
@@ -161,73 +157,77 @@ class AppBackupPickerActivity : AppCompatActivity() {
             result.onSuccess { apps = it }
                 .onFailure {
                     apps = emptyList()
-                    appList.removeAllViews()
-                    appList.addView(text(
-                        "לא ניתן לקרוא את רשימת האפליקציות: " + (it.message ?: "שגיאה לא ידועה"),
-                        13, Color.RED, false
-                    ))
+                    loadError = "לא ניתן לקרוא את רשימת האפליקציות: " + (it.message ?: "שגיאה לא ידועה")
                 }
+            if (result.isSuccess) loadError = null
             renderApps()
         }
     }
 
     private fun renderApps() {
         if (!::appList.isInitialized) return
-        appList.removeAllViews()
         val query = if (::search.isInitialized) search.text.toString().trim().lowercase() else ""
-        val filtered = apps.filter {
+        filteredApps = apps.filter {
             query.isBlank() || it.label.lowercase().contains(query) || it.packageName.lowercase().contains(query)
         }
-        if (::count.isInitialized) count.text = "${filtered.size} אפליקציות"
-        if (filtered.isEmpty()) {
-            appList.addView(text("לא נמצאו אפליקציות תואמות.", 14, palette.muted, false).apply {
-                gravity = Gravity.CENTER
-                setPadding(0, dp(28), 0, dp(28))
-            })
-            return
-        }
-        filtered.forEach { app ->
-            appList.addView(appCard(app), LinearLayout.LayoutParams(-1, -2).apply {
-                bottomMargin = dp(8)
-            })
-        }
+        count.text = loadError ?: "${filteredApps.size} אפליקציות"
+        (appList.adapter as? AppAdapter)?.notifyDataSetChanged()
     }
 
-    private fun appCard(app: AppBackupManager.AppItem): View {
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(11), dp(12), dp(11))
-            background = UiComponents.surface(this@AppBackupPickerActivity, palette.surface, 16, palette.outline, clickable = true)
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { prepareBackup(app) }
+    private inner class AppAdapter : android.widget.BaseAdapter() {
+        override fun getCount(): Int = if (filteredApps.isEmpty()) 1 else filteredApps.size
+        override fun getItem(position: Int): Any? = filteredApps.getOrNull(position)
+        override fun getItemId(position: Int): Long =
+            filteredApps.getOrNull(position)?.packageName?.hashCode()?.toLong() ?: Long.MIN_VALUE
+
+        override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
+            val app = filteredApps.getOrNull(position)
+            if (app == null) {
+                val empty = (convertView as? TextView) ?: text("", 14, palette.muted, false)
+                empty.text = loadError ?: "לא נמצאו אפליקציות תואמות."
+                empty.setTextColor(if (loadError != null) Color.RED else palette.muted)
+                empty.gravity = Gravity.CENTER
+                empty.setPadding(dp(12), dp(28), dp(12), dp(28))
+                empty.background = null
+                return empty
+            }
+
+            val card = (convertView as? LinearLayout) ?: LinearLayout(this@AppBackupPickerActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(11), dp(12), dp(11))
+                background = UiComponents.surface(this@AppBackupPickerActivity, palette.surface, 16, palette.outline, clickable = true)
+                isClickable = true
+                isFocusable = true
+            }
+            card.removeAllViews()
+            val icon = ImageView(this@AppBackupPickerActivity).apply {
+                val cached = iconCache.get(app.packageName) ?: runCatching {
+                    packageManager.getApplicationIcon(app.applicationInfo)
+                }.getOrNull()?.also { iconCache.put(app.packageName, it) }
+                setImageDrawable(cached ?: getDrawable(android.R.drawable.sym_def_app_icon))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+            }
+            card.addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)))
+            val details = LinearLayout(this@AppBackupPickerActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(11), 0, 0, 0)
+            }
+            details.addView(text(app.label, 15, palette.text, true))
+            details.addView(text(app.packageName, 10, palette.muted, false))
+            details.addView(text(
+                "גרסה ${app.versionName} · ${app.versionCode}" + if (app.isSystem) " · מערכת" else "",
+                10, palette.muted, false
+            ))
+            card.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+            card.addView(text("גבה  ›", 12, Color.WHITE, true).apply {
+                gravity = Gravity.CENTER
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+                background = rounded(palette.accent, dp(11))
+            })
+            card.setOnClickListener { prepareBackup(app) }
+            return card
         }
-        val icon = ImageView(this).apply {
-            val cached = iconCache.get(app.packageName) ?: runCatching {
-                packageManager.getApplicationIcon(app.applicationInfo)
-            }.getOrNull()?.also { iconCache.put(app.packageName, it) }
-            setImageDrawable(cached ?: getDrawable(android.R.drawable.sym_def_app_icon))
-            scaleType = ImageView.ScaleType.FIT_CENTER
-        }
-        card.addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)))
-        val details = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(11), 0, 0, 0)
-        }
-        details.addView(text(app.label, 15, palette.text, true))
-        details.addView(text(app.packageName, 10, palette.muted, false))
-        details.addView(text(
-            "גרסה ${app.versionName} · ${app.versionCode}" + if (app.isSystem) " · מערכת" else "",
-            10, palette.muted, false
-        ))
-        card.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
-        card.addView(text("גבה  ›", 12, Color.WHITE, true).apply {
-            gravity = Gravity.CENTER
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-            background = rounded(palette.accent, dp(11))
-        })
-        return card
     }
 
     private fun prepareBackup(app: AppBackupManager.AppItem) {
