@@ -25,6 +25,7 @@ object PairingNotification {
     const val EXTRA_PAIRING_PORT = "pairing_port"
     const val EXTRA_PAIRING_HOST = "pairing_host"
     private const val CHANNEL_ID = "wireless_debugging_pairing_v3"
+    private const val PROGRESS_CHANNEL_ID = "wireless_debugging_progress_v1"
     private const val NOTIFICATION_ID = 4106
     const val WORKING_NOTIFICATION_ID = 4107
 
@@ -49,6 +50,23 @@ object PairingNotification {
                 vibrationPattern = longArrayOf(0, 220, 120, 220)
             }
             manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun ensureProgressChannel(context: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    PROGRESS_CHANNEL_ID,
+                    "איתור וחיבור ADB",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "התראת מצב שקטה בזמן איתור שירות הצימוד או חיבור ADB"
+                    setShowBadge(false)
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+                }
+            )
         }
     }
 
@@ -113,13 +131,13 @@ object PairingNotification {
     }
 
     fun workingNotification(context: Context): android.app.Notification {
-        ensureChannel(context)
-        return NotificationCompat.Builder(context, CHANNEL_ID)
+        ensureProgressChannel(context)
+        return NotificationCompat.Builder(context, PROGRESS_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_baseline_adb_24)
             .setContentTitle("מאתר את שירות הצימוד")
             .setContentText("כשחלון הצימוד ייפתח, תופיע התראת הזנת קוד.")
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             // Foreground work continues even if the user swipes this notification away.
             .setOngoing(false)
             .setOnlyAlertOnce(false)
