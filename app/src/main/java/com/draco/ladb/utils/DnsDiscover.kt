@@ -136,7 +136,9 @@ class DnsDiscover private constructor(
 
     private fun finishResolve(name: String) {
         if (name.isNotBlank()) pendingNames.remove(name)
-        pendingResolves.set(pendingNames.isNotEmpty())
+        // The discovery window stays active until stopScan(), even when a non-local
+        // service has resolved and no candidate is currently pending.
+        pendingResolves.set(started)
     }
 
     private fun resolveService(service: NsdServiceInfo, retry: Int = 0) {
