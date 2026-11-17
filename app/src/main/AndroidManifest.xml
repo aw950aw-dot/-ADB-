@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" android:installLocation="internalOnly">
     <uses-feature android:name="android.software.leanback" android:required="false"/>
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+    <uses-feature android:name="android.hardware.wifi" android:required="false"/>
+    <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
@@ -24,7 +26,7 @@
         <activity android:name=".views.AppBackupPickerActivity" android:exported="false" android:label="בחר אפליקציה לגיבוי"/>
         <activity android:name=".views.AppManagerHubActivity" android:exported="false" android:label="ניהול אפליקציות"/>
         <activity android:name=".views.AppTransferActivity" android:exported="false" android:label="גיבוי ושחזור אפליקציות"/>
-        <activity android:name=".views.DashboardActivity" android:exported="true" android:label="@string/app_name">
+        <activity android:name=".views.DashboardActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/><category android:name="android.intent.category.LEANBACK_LAUNCHER"/></intent-filter>
         </activity>
         <activity android:name=".views.SettingsActivity" android:exported="false" android:label="הגדרות"/>
