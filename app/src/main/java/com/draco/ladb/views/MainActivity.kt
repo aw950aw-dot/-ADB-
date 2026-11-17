@@ -174,7 +174,6 @@ class MainActivity : AppCompatActivity() {
             addView(button("הסבר את הפלט בעזרת AI"){ explainOutput() })
             addView(LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
-                layoutDirection = View.LAYOUT_DIRECTION_RTL
                 gravity = Gravity.CENTER_VERTICAL
                 addView(footerAction("נקה פלט") { vm.clearOutputText() },
                     LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(3), 0, dp(3), 0) })
