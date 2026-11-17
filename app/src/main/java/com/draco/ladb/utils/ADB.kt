@@ -94,7 +94,10 @@ class ADB(private val context: Context) {
      * Start the ADB server
      */
     @Synchronized
-    fun initServer(skipWirelessReset: Boolean = false): Boolean {
+    fun initServer(
+        skipWirelessReset: Boolean = false,
+        connectEndpointOverride: AdbConnectEndpoint? = null
+    ): Boolean {
         if (_running.value == true) return true
         if (tryingToPair) return false
 
@@ -156,73 +159,78 @@ class ADB(private val context: Context) {
                 }
             }
 
-            val nowTime = System.currentTimeMillis()
-            val maxTimeoutTime = nowTime + 10.seconds.inWholeMilliseconds
-            val minDnsScanTime = (DnsDiscover.aliveTime ?: nowTime) + 3.seconds.inWholeMilliseconds
-            while (true) {
-                val nowTime = System.currentTimeMillis()
-                val pendingResolves = DnsDiscover.pendingResolves.get()
-
-                // A discovered TLS endpoint is sufficient to proceed; do not wait
-                // for the full discovery window once the connection port is known.
-                if (DnsDiscover.adbPort != null) {
-                    debug("ADB TLS connection port discovered: " + DnsDiscover.adbPort)
+            var connectEndpoint = connectEndpointOverride ?: DnsDiscover.currentEndpoint()
+            val discoveryDeadline = System.currentTimeMillis() + 15_000L
+            while (connectEndpoint == null && System.currentTimeMillis() < discoveryDeadline) {
+                if (!DnsDiscover.pendingResolves.get() && DnsDiscover.adbPort == null) {
                     break
                 }
-
-                // Wait for pending DNS resolves to finish and the minimum scan time to elapse...
-                if (nowTime >= minDnsScanTime && !pendingResolves) {
-                    debug("DNS resolver done...")
-                    break
-                }
-
-                // Or if 10 seconds pass...
-                if (nowTime >= maxTimeoutTime) {
-                    debug("DNS resolver took too long! Skipping...")
-                    break
-                }
-
-                debug("Awaiting DNS resolver...")
-
-                Thread.sleep(1_000)
+                debug("מאתר כתובת ADB מאובטחת בשירות mDNS…")
+                Thread.sleep(300L)
+                connectEndpoint = DnsDiscover.currentEndpoint()
             }
 
-            val adbPort = DnsDiscover.adbPort
-            if (adbPort != null)
-                debug("Best ADB port discovered: $adbPort")
-            else
-                debug("No ADB port discovered, fallback...")
+            if (connectEndpoint != null) {
+                debug("נמצאה נקודת חיבור ADB: ${connectEndpoint.serial} (${connectEndpoint.serviceName})")
+            } else {
+                debug("לא נמצאה נקודת mDNS לחיבור. ממתין לחיבור USB/ADB שכבר אושר.")
+            }
 
             debug("Starting ADB server...")
-            val startServer = adb(false, listOf("start-server"))
-            val startFinished = startServer.waitFor(30, TimeUnit.SECONDS)
-            if (!startFinished) {
-                startServer.destroyForcibly()
-                debug("הפעלת שרת ADB חרגה מזמן ההמתנה.")
+            val startResult = captureProcessOutput(
+                adb(false, listOf("start-server")),
+                30,
+                "הפעלת שרת ADB חרגה מזמן ההמתנה."
+            )
+            if (startResult.first != 0) {
+                debug("הפעלת שרת ADB נכשלה: ${startResult.second}")
                 return false
             }
 
-            val waitProcess = if (adbPort != null)
-                adb(false, listOf("connect", "localhost:$adbPort"))
-            else
-                adb(false, listOf("wait-for-device"))
-            val waitFinished = waitProcess.waitFor(
-                if (adbPort != null) 30 else 60,
-                TimeUnit.SECONDS
-            )
-
-            if (!waitFinished) {
-                waitProcess.destroyForcibly()
-                debug("Your device didn't connect to LADB")
-                debug("If a reboot doesn't work, please contact support")
-
-                if (isMobileDataAlwaysOnEnabled()) {
-                    debug("Please disable 'Mobile data always on' in Developer Settings!")
-                    Thread.sleep(5_000)
+            if (connectEndpoint != null) {
+                val connectResult = captureProcessOutput(
+                    adb(false, listOf("connect", connectEndpoint.serial)),
+                    30,
+                    "חיבור ADB לנקודת הקצה ${connectEndpoint.serial} חרג מזמן ההמתנה."
+                )
+                val connectOutput = connectResult.second.trim()
+                debug("ADB CONNECT ${connectEndpoint.serial}: ${connectOutput.ifBlank { "exit=${connectResult.first}" }}")
+                if (connectResult.first != 0 ||
+                    connectOutput.contains("unable to connect", ignoreCase = true) ||
+                    connectOutput.contains("cannot connect", ignoreCase = true) ||
+                    connectOutput.contains("failed", ignoreCase = true)
+                ) {
+                    throw IllegalStateException(
+                        "Android אישר את השיוך, אך adb connect ל־${connectEndpoint.serial} נכשל: " +
+                            connectOutput.ifBlank { "קוד יציאה ${connectResult.first}" }
+                    )
                 }
+            } else {
+                captureProcessOutput(
+                    adb(false, listOf("wait-for-device")),
+                    60,
+                    "לא נמצא התקן ADB מאושר. הפעל Wireless Debugging או חבר USB."
+                )
+            }
 
-                tryingToPair = false
-                return false
+            val expectedSerial = connectEndpoint?.serial
+            val deviceDeadline = System.currentTimeMillis() + 20_000L
+            var deviceList = emptyList<String>()
+            while (System.currentTimeMillis() < deviceDeadline) {
+                deviceList = runCatching { getDevices() }.getOrDefault(emptyList())
+                if (deviceList.isNotEmpty() &&
+                    (expectedSerial == null || deviceList.any { it.equals(expectedSerial, ignoreCase = true) })
+                ) break
+                Thread.sleep(400L)
+            }
+            if (autoShell && deviceList.isEmpty()) {
+                throw IllegalStateException("השיוך הצליח אך ADB לא הציג התקן מאושר. בדוק ש-Wireless Debugging עדיין פעיל.")
+            }
+            if (expectedSerial != null && deviceList.none { it.equals(expectedSerial, ignoreCase = true) }) {
+                throw IllegalStateException(
+                    "ADB לא אימת את נקודת החיבור ${expectedSerial}. התקנים שאושרו: " +
+                        deviceList.joinToString(", ").ifBlank { "אין" }
+                )
             }
         }
 
