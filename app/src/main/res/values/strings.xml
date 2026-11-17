@@ -1,5 +1,5 @@
 <resources>
-<string name="app_name">ADB חכם</string>
+<string name="app_name">ADB חכם – גיבוי ושחזור</string>
 <string name="command_hint">הקלד פקודת ADB…</string>
 <string name="command_hint_waiting">ממתין לחיבור ADB…</string>
 <string name="bookmarks">פקודות שמורות</string><string name="last_command">פקודה אחרונה</string><string name="help">עזרה</string><string name="more">מידע</string><string name="share">שיתוף</string><string name="clear">ניקוי מסך</string><string name="add">הוסף</string><string name="delete">מחק</string><string name="edit">ערוך</string><string name="cancel">ביטול</string><string name="done">סיום</string><string name="pair">שיוך</string><string name="skip">דלג</string><string name="dismiss">סגור</string>

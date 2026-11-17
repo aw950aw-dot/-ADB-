@@ -488,4 +488,124 @@ class ADB(private val context: Context) {
                 outputBufferFile.appendText("* $msg" + System.lineSeparator())
         }
     }
+
+    data class CommandResult(val exitCode: Int, val output: String)
+
+    private fun processForAdb(arguments: List<String>): Process {
+        return ProcessBuilder(listOf(adbPath) + arguments)
+            .directory(context.filesDir)
+            .apply {
+                environment().put("HOME", context.filesDir.path)
+                environment().put("TMPDIR", context.cacheDir.path)
+            }
+            .start()
+    }
+
+    /** Executes one bounded command through the authorized local Wireless ADB connection. */
+    fun executeShell(command: String, timeoutSeconds: Long = 30): CommandResult {
+        require(command.isNotBlank() && command.length <= 12_000) { "Invalid shell command" }
+        if (_running.value != true) throw IllegalStateException("אין חיבור ADB פעיל")
+        val process = processForAdb(listOf("shell", "sh", "-c", command))
+        val output = java.io.ByteArrayOutputStream()
+        val reader = Thread {
+            runCatching { process.inputStream.use { it.copyTo(output) } }
+        }.apply { isDaemon = true; start() }
+        if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+            process.destroyForcibly()
+            reader.join(2_000)
+            throw IllegalStateException("פקודת ADB חרגה מזמן ההמתנה")
+        }
+        reader.join(5_000)
+        return CommandResult(process.exitValue(), output.toString("UTF-8").trim())
+    }
+
+    /** Streams binary stdout from adb exec-out to a local file without converting it to text. */
+    fun execOutToFile(command: String, destination: File, timeoutSeconds: Long = 300): CommandResult {
+        require(command.isNotBlank() && command.length <= 12_000) { "Invalid shell command" }
+        if (_running.value != true) throw IllegalStateException("אין חיבור ADB פעיל")
+        destination.parentFile?.mkdirs()
+        val process = processForAdb(listOf("exec-out", "sh", "-c", command))
+        val errorText = StringBuilder()
+        val stdoutThread = Thread {
+            runCatching {
+                java.io.FileOutputStream(destination).use { out ->
+                    process.inputStream.use { it.copyTo(out, 64 * 1024) }
+                }
+            }
+        }.apply { isDaemon = true; start() }
+        val stderrThread = Thread {
+            runCatching {
+                process.errorStream.bufferedReader().use { errorText.append(it.readText()) }
+            }
+        }.apply { isDaemon = true; start() }
+
+        if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+            process.destroyForcibly()
+            stdoutThread.join(2_000)
+            stderrThread.join(2_000)
+            destination.delete()
+            throw IllegalStateException("העברת קובץ מ־ADB חרגה מזמן ההמתנה")
+        }
+        stdoutThread.join(5_000)
+        stderrThread.join(5_000)
+        val result = CommandResult(process.exitValue(), errorText.toString().trim())
+        if (result.exitCode != 0 || !destination.isFile || destination.length() == 0L) {
+            destination.delete()
+            throw IllegalStateException(result.output.ifBlank { "לא ניתן לקרוא את הנתונים דרך ADB" })
+        }
+        return result
+    }
+
+    /** Streams a local binary archive to a remote command through adb exec-in. */
+    fun execInFile(source: File, command: String, timeoutSeconds: Long = 300): CommandResult {
+        require(source.isFile && source.canRead()) { "קובץ הגיבוי אינו קריא" }
+        require(command.isNotBlank() && command.length <= 12_000) { "Invalid shell command" }
+        if (_running.value != true) throw IllegalStateException("אין חיבור ADB פעיל")
+        val process = processForAdb(listOf("exec-in", "sh", "-c", command))
+        val outputText = StringBuilder()
+        val reader = Thread {
+            runCatching { process.inputStream.bufferedReader().use { outputText.append(it.readText()) } }
+        }.apply { isDaemon = true; start() }
+
+        source.inputStream().use { input ->
+            process.outputStream.use { output -> input.copyTo(output, 64 * 1024) }
+        }
+
+        if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+            process.destroyForcibly()
+            reader.join(2_000)
+            throw IllegalStateException("שחזור קובץ דרך ADB חרג מזמן ההמתנה")
+        }
+        reader.join(5_000)
+        return CommandResult(process.exitValue(), outputText.toString().trim())
+    }
+
+    /** Installs a base APK together with all split APKs in one Package Manager session. */
+    fun installApkSet(files: List<File>): String {
+        require(files.isNotEmpty() && files.all { it.isFile && it.canRead() }) {
+            "קובצי APK חסרים או אינם קריאים"
+        }
+        if (_running.value != true) throw IllegalStateException("אין חיבור ADB פעיל")
+        val args = mutableListOf(adbPath, "install-multiple", "-r")
+        args.addAll(files.map { it.absolutePath })
+        val process = ProcessBuilder(args)
+            .directory(context.filesDir)
+            .redirectErrorStream(true)
+            .apply {
+                environment().put("HOME", context.filesDir.path)
+                environment().put("TMPDIR", context.cacheDir.path)
+            }
+            .start()
+        if (!process.waitFor(180, TimeUnit.SECONDS)) {
+            process.destroyForcibly()
+            throw IllegalStateException("התקנת חבילת APK חרגה מזמן ההמתנה")
+        }
+        val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+        debug("APK SET INSTALL:\n$output")
+        if (process.exitValue() != 0 || !output.contains("Success", ignoreCase = true)) {
+            throw IllegalStateException(output.ifBlank { "התקנת חבילת APK נכשלה" })
+        }
+        return output
+    }
+
 }

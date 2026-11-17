@@ -1,11 +1,15 @@
 <resources>
-    <style name="Theme.LADB" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
-        <item name="colorPrimary">@color/green</item>
-        <item name="colorSecondary">@color/green</item>
-        <item name="colorSurface">@android:color/black</item>
-        <item name="android:windowBackground">?colorSurface</item>
-        <item name="android:statusBarColor">?colorSurface</item>
-        <item name="android:navigationBarColor">?colorSurface</item>
-        <item name="fontFamily">monospace</item>
+    <style name="Theme.LADB" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#2879D8</item>
+        <item name="colorPrimaryVariant">#174B83</item>
+        <item name="colorSecondary">#21A99A</item>
+        <item name="colorSurface">#111E31</item>
+        <item name="android:windowBackground">#0A111F</item>
+        <item name="android:statusBarColor">#080E1B</item>
+        <item name="android:navigationBarColor">#080E1B</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="fontFamily">sans</item>
     </style>
 </resources>
