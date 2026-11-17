@@ -239,14 +239,9 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun showPairingNotificationIfNeeded() {
-        if (adb.running.value != true) {
-            PairingNotification.show(
-                this,
-                "השאר את ההתראה זמינה. הזן כאן את קוד השיוך בזמן שמסך Wireless Debugging פתוח."
-            )
-        } else {
-            PairingNotification.cancel(this)
-        }
+        // Do not leave an idle, persistent notification in the shade.
+        // The connection screen starts discovery only when the user opens pairing settings.
+        if (adb.running.value != true) PairingNotification.cancel(this)
     }
 
     private fun showFirstRunGuideIfNeeded() {
@@ -263,10 +258,9 @@ class DashboardActivity : AppCompatActivity() {
             .setPositiveButton("הבנתי, המשך") { _, _ ->
                 prefs.edit().putBoolean("guide_shown", true).apply()
             }
-            .setNeutralButton("פתח אפשרויות למפתחים") { _, _ ->
+            .setNeutralButton("פתח מסך חיבור") { _, _ ->
                 prefs.edit().putBoolean("guide_shown", true).apply()
-                PairingNotification.show(this@DashboardActivity)
-                runCatching { startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
+                startActivity(Intent(this@DashboardActivity, ConnectionActivity::class.java))
             }
             .setNegativeButton("פתח אודות הטלפון") { _, _ ->
                 prefs.edit().putBoolean("guide_shown", true).apply()
