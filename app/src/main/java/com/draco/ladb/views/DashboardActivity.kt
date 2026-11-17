@@ -91,7 +91,7 @@ class DashboardActivity : AppCompatActivity() {
             elevation = dp(3).toFloat()
         }
         hero.addView(text("BACKUP CENTER  /  01", 10, Color.rgb(143, 219, 255), true))
-        hero.addView(text("גיבוי ושחזור\\nאפליקציות ונתונים", 27, Color.WHITE, true).apply {
+        hero.addView(text("גיבוי ושחזור\nאפליקציות ונתונים", 27, Color.WHITE, true).apply {
             setPadding(0, dp(9), 0, dp(7))
         })
         hero.addView(text(
