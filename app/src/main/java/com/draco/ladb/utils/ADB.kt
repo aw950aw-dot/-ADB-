@@ -411,26 +411,72 @@ class ADB(private val context: Context) {
      * Ask the device to pair on Android 11+ devices
      */
     fun pair(port: String, pairingCode: String): Boolean {
-        val pairShell = adb(false, listOf("pair", "localhost:$port"))
+        val numericPort = port.toIntOrNull()
+        if (numericPort !in 1..65535 || !pairingCode.matches(Regex("\\d{6}"))) return false
 
-        /* Sleep to allow shell to catch up */
-        Thread.sleep(5000)
+        tryingToPair = true
+        var pairProcess: Process? = null
+        try {
+            // Drain ADB output while it is running. Waiting before reading can fill the pipe
+            // and make the pairing process appear to hang.
+            pairProcess = ProcessBuilder(adbPath, "pair", "localhost:$numericPort")
+                .directory(context.filesDir)
+                .redirectErrorStream(true)
+                .apply {
+                    environment().put("HOME", context.filesDir.path)
+                    environment().put("TMPDIR", context.cacheDir.path)
+                }
+                .start()
 
-        /* Pipe pairing code */
-        PrintStream(pairShell.outputStream).apply {
-            println(pairingCode)
-            flush()
+            val captured = StringBuilder()
+            val outputReader = Thread {
+                runCatching {
+                    pairProcess.inputStream.bufferedReader().useLines { lines ->
+                        lines.forEach { line ->
+                            synchronized(captured) { captured.append(line).append('\n') }
+                            debug("ADB PAIR: $line")
+                        }
+                    }
+                }
+            }.apply { isDaemon = true; name = "ADBPairOutput"; start() }
+
+            // The bundled adb client prints its interactive prompt asynchronously.
+            Thread.sleep(1_500)
+            pairProcess.outputStream.bufferedWriter().use { writer ->
+                writer.write(pairingCode)
+                writer.newLine()
+                writer.flush()
+            }
+
+            val finished = pairProcess.waitFor(20, TimeUnit.SECONDS)
+            if (!finished) {
+                pairProcess.destroyForcibly()
+                pairProcess.waitFor(2, TimeUnit.SECONDS)
+                debug("ADB pairing timed out.")
+                return false
+            }
+            outputReader.join(2_000)
+            val outputText = synchronized(captured) { captured.toString() }
+            val success = pairProcess.exitValue() == 0 &&
+                outputText.contains("success", ignoreCase = true)
+            if (!success) debug("ADB pairing failed: " + outputText.takeLast(1200))
+            return success
+        } catch (error: Exception) {
+            debug("ADB pairing error: ${error.message ?: "unknown error"}")
+            runCatching { pairProcess?.destroyForcibly() }
+            return false
+        } finally {
+            runCatching {
+                val killServer = ProcessBuilder(adbPath, "kill-server")
+                    .directory(context.filesDir)
+                    .apply {
+                        environment().put("HOME", context.filesDir.path)
+                        environment().put("TMPDIR", context.cacheDir.path)
+                    }.start()
+                if (!killServer.waitFor(3, TimeUnit.SECONDS)) killServer.destroyForcibly()
+            }
+            tryingToPair = false
         }
-
-        /* Continue once finished pairing (or 10s elapses) */
-        pairShell.waitFor(10, TimeUnit.SECONDS)
-        pairShell.destroyForcibly().waitFor()
-
-        val killShell = adb(false, listOf("kill-server"))
-        killShell.waitFor(3, TimeUnit.SECONDS)
-        killShell.destroyForcibly()
-
-        return pairShell.exitValue() == 0
     }
 
     /**
