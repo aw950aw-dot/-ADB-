@@ -1,6 +1,7 @@
 package com.draco.ladb.utils
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -54,6 +55,7 @@ object PairingNotification {
         )
     }
 
+    @SuppressLint("MissingPermission")
     fun show(context: Context, statusText: String = "הקלד את קוד 6 הספרות ולחץ „אישור אוטומטי”") {
         if (!allowed(context)) return
         try {
@@ -108,10 +110,12 @@ object PairingNotification {
             .build()
     }
 
+    @SuppressLint("MissingPermission")
     fun cancelWorking(context: Context) {
         runCatching { NotificationManagerCompat.from(context).cancel(WORKING_NOTIFICATION_ID) }
     }
 
+    @SuppressLint("MissingPermission")
     fun showResult(context: Context, success: Boolean, message: String) {
         if (!allowed(context)) return
         try {
@@ -133,6 +137,7 @@ object PairingNotification {
         }
     }
 
+    @SuppressLint("MissingPermission")
     fun cancel(context: Context) {
         runCatching { NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID) }
     }
