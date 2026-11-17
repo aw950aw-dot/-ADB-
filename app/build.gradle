@@ -78,6 +78,7 @@ android {
 
     buildFeatures {
         viewBinding true
+        aidl true
     }
     namespace 'com.draco.ladb'
 }
@@ -100,4 +101,8 @@ dependencies {
     implementation 'com.google.android.material:material:1.12.0'
     implementation 'androidx.drawerlayout:drawerlayout:1.2.0'
     implementation 'com.google.android.gms:play-services-oss-licenses:17.1.0'
+
+    // Official Shizuku API: request user-approved shell access through a UserService.
+    implementation "dev.rikka.shizuku:api:13.1.5"
+    implementation "dev.rikka.shizuku:provider:13.1.5"
 }
