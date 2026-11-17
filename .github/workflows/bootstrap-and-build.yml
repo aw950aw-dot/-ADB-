@@ -117,11 +117,11 @@ jobs:
           echo "$VERIFY_OUTPUT" | grep -q "Verified using v2 scheme (APK Signature Scheme v2): true"
           BADGING=$("$AAPT" dump badging "$APK")
           printf '%s\n' "$BADGING" | head -n 8
-          echo "$BADGING" | grep -q "package: name='com.aw950aw.adbsmart' versionCode='13' versionName='1.9.3'"
+          echo "$BADGING" | grep -q "package: name='com.aw950aw.adbsmart' versionCode='14' versionName='1.9.4'"
           sha256sum "$APK"
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: adb-smart-1.9.3-installable
+          name: adb-smart-1.9.4-installable
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
