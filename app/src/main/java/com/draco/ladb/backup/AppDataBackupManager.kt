@@ -153,7 +153,7 @@ object AppDataBackupManager {
             throw IllegalArgumentException(
                 if (error.message?.contains("Tag mismatch", true) == true || error is java.io.IOException)
                     "הסיסמה שגויה או שקובץ הגיבוי פגום."
-                else "לא ניתן לשחזר את הגיבוי: " + (error.message ?: "שגיאה לא ידועה"),
+                else "לא ניתן לשחזר את הגיבוי: " + error.localizedMessage.orEmpty(),
                 error
             )
         } finally {
