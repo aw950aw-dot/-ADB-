@@ -44,11 +44,7 @@ class HelpPreferenceFragment : PreferenceFragmentCompat() {
             }
 
             getString(R.string.restart_key) -> restartApp()
-            getString(R.string.tutorial_key) -> openURL(getString(R.string.tutorial_url))
-
             getString(R.string.developer_key) -> openURL(getString(R.string.developer_url))
-            getString(R.string.source_key) -> openURL(getString(R.string.source_url))
-            getString(R.string.contact_key) -> openURL(getString(R.string.contact_url))
             getString(R.string.licenses_key) -> {
                 val intent = Intent(requireContext(), OssLicensesMenuActivity::class.java)
                 startActivity(intent)
