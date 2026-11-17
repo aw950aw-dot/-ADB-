@@ -160,7 +160,7 @@ object AiProviderClient {
         }
         val status = connection.responseCode
         val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-        val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        val raw = readLimited(stream, 2 * 1024 * 1024)
         if (status !in 200..299) throw ApiFailure(status, "HTTP " + status + ": " + raw.take(1000))
         val json = JSONObject(raw)
         val data = json.optJSONArray(if (provider == "gemini") "models" else "data") ?: JSONArray()
