@@ -21,6 +21,7 @@
             android:name=".services.PairingService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice"/>
+        <activity android:name=".views.AboutActivity" android:exported="false" android:label="אודות ADB SMART"/>
         <activity android:name=".views.AppDataBackupActivity" android:exported="false" android:label="גיבוי נתוני ADB SMART"/>
         <activity android:name=".views.ConnectionActivity" android:exported="false" android:launchMode="singleTop" android:label="חיבור Wireless Debugging"/>
         <activity android:name=".views.AppBackupPickerActivity" android:exported="false" android:label="בחר אפליקציה לגיבוי"/>

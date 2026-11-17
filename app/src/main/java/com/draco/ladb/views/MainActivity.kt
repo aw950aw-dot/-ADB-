@@ -22,6 +22,8 @@ import com.draco.ladb.utils.ApiKeyVault
 import com.draco.ladb.utils.AiProviderClient
 import com.draco.ladb.utils.UiTheme
 import com.draco.ladb.utils.UiComponents
+import com.draco.ladb.utils.AppDrawer
+import androidx.drawerlayout.widget.DrawerLayout
 import com.draco.ladb.viewmodels.MainActivityViewModel
 import androidx.activity.viewModels
 import androidx.activity.result.contract.ActivityResultContracts
@@ -55,62 +57,129 @@ class MainActivity : AppCompatActivity() {
     private fun button(s: String, action: () -> Unit): TextView =
         UiComponents.button(this, s, palette.accent, Color.WHITE, null, 48, 2, action)
     private fun addSpace(h:Int=10){ root.addView(Space(this).apply { minimumHeight=dp(h) }) }
-    override fun onCreate(savedInstanceState:Bundle?){ UiTheme.applySavedMode(this); super.onCreate(savedInstanceState)
-        window.statusBarColor=palette.statusBar; window.navigationBarColor=palette.navigationBar; window.decorView.systemUiVisibility=if(palette.dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-        root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(16),dp(16),dp(22)); layoutDirection=View.LAYOUT_DIRECTION_RTL; setBackgroundColor(palette.background) }
-        root.addView(LinearLayout(this).apply {
-            orientation=LinearLayout.HORIZONTAL
-            layoutDirection=View.LAYOUT_DIRECTION_RTL
-            gravity=Gravity.CENTER_VERTICAL
-            addView(settingsGearButton(),
-                LinearLayout.LayoutParams(dp(48),dp(48)).apply { setMargins(0,0,dp(8),0) })
-            addView(LinearLayout(this@MainActivity).apply {
-                orientation=LinearLayout.VERTICAL
-                addView(label("ADB חכם",27f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
-                addView(label("כלי ניהול Android בעברית",13f))
-            },LinearLayout.LayoutParams(0,-2,1f))
-        })
-        addSpace()
-        root.addView(panel().apply {
-            addView(label("מצב החיבור",16f).apply { typeface=Typeface.DEFAULT_BOLD })
-            addView(LinearLayout(this@MainActivity).apply {
-                orientation=LinearLayout.HORIZONTAL
-                gravity=Gravity.CENTER_VERTICAL
-                layoutDirection=View.LAYOUT_DIRECTION_RTL
-                connectionSpinner=ProgressBar(this@MainActivity).apply { isIndeterminate=true }
-                addView(connectionSpinner,LinearLayout.LayoutParams(dp(28),dp(28)).apply { marginEnd=dp(8) })
-                status=label("מתחבר ל־ADB…",14f)
-                addView(status,LinearLayout.LayoutParams(0,-2,1f))
+    override fun onCreate(savedInstanceState: Bundle?) {
+        UiTheme.applySavedMode(this)
+        super.onCreate(savedInstanceState)
+
+        val drawer = AppDrawer.create(this)
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            isSmoothScrollingEnabled = true
+        }
+        root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(17), dp(13), dp(17), dp(24))
+            layoutDirection = View.LAYOUT_DIRECTION_RTL
+            setBackgroundColor(palette.background)
+        }
+        scroll.addView(root)
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        header.addView(AppDrawer.menuButton(this, drawer),
+            LinearLayout.LayoutParams(dp(48), dp(48)))
+        header.addView(LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(label("ADB SMART  /  TERMINAL + AI", 9f).apply {
+                setTextColor(blue)
+                typeface = Typeface.DEFAULT_BOLD
             })
-            addView(button("התחברות / שיוך מחדש"){ showPairDialog() })
-            addView(button("פקודות מוכנות"){ startActivity(Intent(this@MainActivity,PresetsActivity::class.java)) })
+            addView(label("מסוף פקודות חכם", 23f).apply {
+                typeface = Typeface.DEFAULT_BOLD
+            })
+        }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(11) })
+        root.addView(header)
+        root.addView(label(
+            "הרץ פקודות, קבל עזרה מה־AI וצפה בתוצאות בזמן אמת.",
+            12f
+        ).apply { setTextColor(palette.muted); setPadding(0, dp(5), 0, dp(15)) })
+
+        val connectionCard = panel()
+        connectionCard.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(label("מצב חיבור", 16f).apply { typeface = Typeface.DEFAULT_BOLD })
+                addView(label("Wireless Debugging  •  ADB", 10f).apply {
+                    setTextColor(palette.muted)
+                    setPadding(0, dp(3), 0, 0)
+                })
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            connectionSpinner = ProgressBar(this@MainActivity).apply { isIndeterminate = true }
+            addView(connectionSpinner, LinearLayout.LayoutParams(dp(26), dp(26)))
         })
-        addSpace()
-        root.addView(panel().apply {
-            addView(label("ניהול אפליקציות",18f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
-            val rows = listOf<Pair<String, () -> Unit>>(
-                "הסרת אפליקציות" to { openAppManager("remove") },
-                "השבתת אפליקציות מערכת" to { openAppManager("disable") },
-                "החזרת אפליקציות מושבתות" to { openAppManager("enable") },
-                "התקנת קובצי APK" to { apkPicker.launch(arrayOf("application/vnd.android.package-archive","application/octet-stream")) }
-            )
-            rows.chunked(2).forEachIndexed { rowIndex, pair ->
-                addView(LinearLayout(this@MainActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    pair.forEachIndexed { index, entry ->
-                        val color = listOf(Color.rgb(28,125,205),Color.rgb(20,150,135),Color.rgb(109,89,190),Color.rgb(210,126,37))[(rowIndex*2+index)%4]
-                        addView(tile(entry.first,color,entry.second),
-                            LinearLayout.LayoutParams(0,dp(80),1f).apply { setMargins(dp(4),dp(3),dp(4),dp(3)) })
-                    }
-                    if(pair.size==1) addView(Space(this@MainActivity),LinearLayout.LayoutParams(0,dp(80),1f))
-                }, LinearLayout.LayoutParams(-1, dp(86)))
-            }
-            addView(label("הסרה של אפליקציות מערכת היא למשתמש הנוכחי בלבד; לא ניתן למחוק את קובץ המערכת עצמו.",11f))
+        status = label("ממתין למצב החיבור…", 13f).apply {
+            setPadding(dp(12), dp(11), dp(12), dp(11))
+            background = UiComponents.shape(this@MainActivity, palette.surfaceAlt, 12, palette.outline)
+        }
+        connectionCard.addView(status, LinearLayout.LayoutParams(-1, -2).apply {
+            topMargin = dp(10)
         })
-        addSpace()
-        root.addView(label("פעולות מהירות",20f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
-        val actions=listOf(
+        connectionCard.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(button("התחבר / שייך") { showPairDialog() },
+                LinearLayout.LayoutParams(0, dp(47), 1f).apply { setMargins(0, dp(9), dp(4), 0) })
+            addView(UiComponents.button(
+                this@MainActivity,
+                "פקודות מוכנות",
+                palette.surfaceAlt,
+                palette.text,
+                palette.outline,
+                47,
+                2
+            ) {
+                startActivity(Intent(this@MainActivity, PresetsActivity::class.java))
+            }, LinearLayout.LayoutParams(0, dp(47), 1f).apply { setMargins(dp(4), dp(9), 0, 0) })
+        })
+        root.addView(connectionCard)
+
+        addSpace(13)
+        val aiCard = panel()
+        aiCard.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(label("עוזר AI לפקודות", 18f).apply {
+                setTextColor(blue)
+                typeface = Typeface.DEFAULT_BOLD
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(label("AI", 10f).apply {
+                setTextColor(palette.accent)
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(dp(8), dp(5), dp(8), dp(5))
+                background = UiComponents.shape(this@MainActivity, palette.surfaceAlt, 8, palette.outline)
+            })
+        })
+        aiRequest = EditText(this).apply {
+            hint = "לדוגמה: הצג את כל האפליקציות שהתקנתי"
+            minLines = 3
+            maxLines = 5
+            gravity = Gravity.RIGHT or Gravity.TOP
+            setTextColor(palette.text)
+            setHintTextColor(palette.muted)
+            setPadding(dp(13), dp(12), dp(13), dp(12))
+            background = UiComponents.shape(this@MainActivity, palette.inputBackground, 14, palette.outline)
+        }
+        aiCard.addView(aiRequest, LinearLayout.LayoutParams(-1, -2).apply {
+            topMargin = dp(11)
+        })
+        aiCard.addView(button("הכן פקודת ADB") { askAi() },
+            LinearLayout.LayoutParams(-1, dp(49)).apply { topMargin = dp(10) })
+        aiCard.addView(label(
+            "פקודות משנות יוצגו לאישור לפני ביצוע. פקודות קריאה בלבד מאושרות אוטומטית.",
+            11f
+        ).apply { setTextColor(palette.muted); setPadding(0, dp(7), 0, 0) })
+        root.addView(aiCard)
+
+        addSpace(14)
+        root.addView(label("פעולות מהירות", 18f).apply {
+            setTextColor(palette.text)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 0, 0, dp(7))
+        })
+        val actions = listOf(
             "פרטי המכשיר" to "getprop | grep -E 'ro.product.model|ro.build.version.release|ro.build.version.sdk'",
             "רשימת אפליקציות" to "pm list packages -3",
             "נפח אחסון" to "df -h",
@@ -118,91 +187,172 @@ class MainActivity : AppCompatActivity() {
             "זיכרון RAM" to "cat /proc/meminfo",
             "כתובת IP" to "ip addr",
             "רזולוציית מסך" to "wm size",
-            "ניקוי זיכרון מטמון" to "pm trim-caches 1G"
+            "ניקוי מטמון" to "pm trim-caches 1G"
         )
         actions.chunked(2).forEachIndexed { rowIndex, pair ->
             root.addView(LinearLayout(this).apply {
-                orientation=LinearLayout.HORIZONTAL
-                pair.forEachIndexed { index, (title,cmd) ->
-                    val color=when((rowIndex*2+index)%4) {
-                        0 -> Color.rgb(28,125,205)
-                        1 -> Color.rgb(20,150,135)
-                        2 -> Color.rgb(109,89,190)
-                        else -> Color.rgb(210,126,37)
-                    }
-                    addView(tile(title,color){ runCommand(cmd) },LinearLayout.LayoutParams(0,dp(82),1f).apply { setMargins(dp(4),dp(4),dp(4),dp(4)) })
-                }
-                if(pair.size==1) addView(Space(this@MainActivity),LinearLayout.LayoutParams(0,dp(82),1f))
-            })
-        }
-        addSpace()
-        root.addView(panel().apply {
-            addView(label("סוכן AI – כתוב מה תרצה לבצע",18f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
-            aiRequest=EditText(this@MainActivity).apply { hint="לדוגמה: הצג את כל האפליקציות שהתקנתי"; minLines=2; gravity=Gravity.RIGHT or Gravity.TOP }
-            addView(aiRequest)
-            addView(button("הכן פקודת ADB"){ askAi() })
-            addView(label("הפקודה תוצג לאישור לפני ביצוע. המפתח נשמר מוצפן במכשיר.",12f))
-        })
-        addSpace()
-        root.addView(panel().apply {
-            addView(label("פקודת ADB ידנית",18f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
-            command=EditText(this@MainActivity).apply { hint="הקלד פקודה…"; setSingleLine(true); textDirection=View.TEXT_DIRECTION_LTR }
-            addView(command)
-            addView(button("בצע פקודה"){ runCommand(command.text.toString()) })
-        })
-        addSpace()
-        root.addView(panel().apply {
-            addView(label("פלט ADB",19f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
-            addView(label("אפשר לגלול לאורך כל התוצאה ולבחור טקסט להעתקה.",12f))
-            output=label("הפלט יופיע כאן",12f).apply {
-                setTextIsSelectable(true)
-                textDirection=View.TEXT_DIRECTION_LTR
-                gravity=Gravity.LEFT or Gravity.TOP
-                typeface=Typeface.MONOSPACE
-                setTextColor(palette.text)
-                setPadding(dp(14),dp(14),dp(14),dp(14))
-                setLineSpacing(dp(3).toFloat(),1f)
-                background=GradientDrawable().apply { setColor(palette.surfaceAlt); cornerRadius=dp(14).toFloat() }
-            }
-            outputScroll=ScrollView(this@MainActivity).apply {
-                isFillViewport=false
-                isSmoothScrollingEnabled=true
-                isNestedScrollingEnabled=true
-                isVerticalScrollBarEnabled=true
-                addView(output,android.widget.FrameLayout.LayoutParams(-1,-2))
-            }
-            addView(outputScroll,LinearLayout.LayoutParams(-1,dp(300)))
-            addView(button("הסבר את הפלט בעזרת AI"){ explainOutput() })
-            addView(LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                addView(footerAction("נקה פלט") { vm.clearOutputText() },
-                    LinearLayout.LayoutParams(0, dp(52), 1f).apply { setMargins(dp(3), 0, dp(3), 0) })
-                addView(footerAction("היסטוריית פקודות") { showHistory() },
-                    LinearLayout.LayoutParams(0, dp(52), 1f).apply { setMargins(dp(3), 0, dp(3), 0) })
+                pair.forEachIndexed { index, (title, cmd) ->
+                    val tint = when ((rowIndex * 2 + index) % 4) {
+                        0 -> Color.rgb(34, 112, 178)
+                        1 -> Color.rgb(20, 139, 126)
+                        2 -> Color.rgb(104, 88, 171)
+                        else -> Color.rgb(176, 111, 45)
+                    }
+                    addView(tile(title, tint) { runCommand(cmd) },
+                        LinearLayout.LayoutParams(0, dp(70), 1f).apply {
+                            setMargins(dp(3), dp(3), dp(3), dp(3))
+                        })
+                }
+            })
+        }
+
+        addSpace(12)
+        val appsCard = panel()
+        appsCard.addView(label("ניהול אפליקציות", 17f).apply {
+            setTextColor(blue)
+            typeface = Typeface.DEFAULT_BOLD
+        })
+        val appActions = listOf<Pair<String, () -> Unit>>(
+            "הסרה" to { openAppManager("remove") },
+            "השבתה" to { openAppManager("disable") },
+            "הפעלה" to { openAppManager("enable") },
+            "התקנת APK" to {
+                apkPicker.launch(arrayOf(
+                    "application/vnd.android.package-archive",
+                    "application/octet-stream"
+                ))
+            }
+        )
+        appActions.chunked(2).forEach { rowItems ->
+            appsCard.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                rowItems.forEach { (title, action) ->
+                    addView(UiComponents.button(
+                        this@MainActivity,
+                        title,
+                        palette.surfaceAlt,
+                        palette.text,
+                        palette.outline,
+                        45,
+                        2,
+                        action
+                    ), LinearLayout.LayoutParams(0, dp(45), 1f).apply {
+                        setMargins(dp(3), dp(4), dp(3), 0)
+                    })
+                }
+            })
+        }
+        appsCard.addView(label(
+            "הסרת אפליקציות מערכת משפיעה על המשתמש הנוכחי בלבד.",
+            10f
+        ).apply { setTextColor(palette.muted); setPadding(0, dp(7), 0, 0) })
+        root.addView(appsCard)
+
+        addSpace(12)
+        val manualCard = panel()
+        manualCard.addView(label("פקודה ידנית", 17f).apply {
+            setTextColor(blue)
+            typeface = Typeface.DEFAULT_BOLD
+        })
+        command = EditText(this).apply {
+            hint = "הקלד פקודת ADB או shell…"
+            setSingleLine(true)
+            textDirection = View.TEXT_DIRECTION_LTR
+            gravity = Gravity.LEFT or Gravity.CENTER_VERTICAL
+            setTextColor(palette.text)
+            setHintTextColor(palette.muted)
+            setPadding(dp(13), dp(10), dp(13), dp(10))
+            background = UiComponents.shape(this@MainActivity, palette.inputBackground, 13, palette.outline)
+        }
+        manualCard.addView(command, LinearLayout.LayoutParams(-1, dp(50)).apply {
+            topMargin = dp(8)
+        })
+        manualCard.addView(button("בצע פקודה") {
+            runCommand(command.text.toString())
+        }, LinearLayout.LayoutParams(-1, dp(47)).apply { topMargin = dp(9) })
+        root.addView(manualCard)
+
+        addSpace(12)
+        val terminalCard = panel()
+        terminalCard.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(label("פלט ADB", 18f).apply {
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(blue)
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(label("LIVE OUTPUT", 9f).apply {
+                setTextColor(palette.muted)
+                typeface = Typeface.DEFAULT_BOLD
             })
         })
-        val pageScroll = ScrollView(this).apply { isFillViewport = true; addView(root) }
-        setContentView(pageScroll)
-        UiComponents.applySystemBars(this, pageScroll, palette)
-        vm.outputText.observe(this){ value ->
-            val wasAtBottom = outputScroll.childCount == 0 ||
-                outputScroll.scrollY + outputScroll.height >= outputScroll.getChildAt(0).height - dp(48)
-            output.text=value.ifBlank{"ממתין לפלט…"}
-            if(wasAtBottom) outputScroll.post { outputScroll.fullScroll(View.FOCUS_DOWN) }
+        output = TextView(this).apply {
+            text = "ממתין לפלט…"
+            textSize = 12f
+            setTextIsSelectable(true)
+            textDirection = View.TEXT_DIRECTION_LTR
+            gravity = Gravity.LEFT or Gravity.TOP
+            typeface = Typeface.MONOSPACE
+            setTextColor(Color.rgb(215, 230, 242))
+            setPadding(dp(14), dp(14), dp(14), dp(14))
+            setLineSpacing(dp(3).toFloat(), 1f)
+            background = GradientDrawable().apply {
+                setColor(Color.rgb(8, 17, 29))
+                cornerRadius = dp(14).toFloat()
+                setStroke(dp(1), Color.rgb(34, 58, 80))
+            }
         }
-        vm.adb.running.observe(this){ ready->
-            status.text=if(ready==true)"מחובר ומוכן לפקודות" else "מתחבר ל־ADB…"
-            status.setTextColor(if(ready==true)Color.rgb(20,140,80) else Color.rgb(190,90,35))
-            connectionSpinner.visibility=if(ready==true)View.GONE else View.VISIBLE
-            if(ready==true) {
-                val queued=pendingPresetCommand
-                if(!queued.isNullOrBlank()) {
-                    pendingPresetCommand=null
+        outputScroll = ScrollView(this).apply {
+            isFillViewport = false
+            isSmoothScrollingEnabled = true
+            isNestedScrollingEnabled = true
+            isVerticalScrollBarEnabled = true
+            addView(output, android.widget.FrameLayout.LayoutParams(-1, -2))
+        }
+        terminalCard.addView(outputScroll, LinearLayout.LayoutParams(-1, dp(310)).apply {
+            topMargin = dp(10)
+        })
+        terminalCard.addView(button("הסבר את הפלט בעזרת AI") { explainOutput() },
+            LinearLayout.LayoutParams(-1, dp(47)).apply { topMargin = dp(10) })
+        terminalCard.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(footerAction("נקה פלט") { vm.clearOutputText() },
+                LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+                    setMargins(dp(3), dp(8), dp(3), 0)
+                })
+            addView(footerAction("היסטוריה") { showHistory() },
+                LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+                    setMargins(dp(3), dp(8), dp(3), 0)
+                })
+        })
+        root.addView(terminalCard)
+
+        AppDrawer.attach(this, drawer, scroll)
+        setContentView(drawer)
+        UiComponents.applySystemBars(this, drawer, palette)
+
+        vm.outputText.observe(this) { value ->
+            val wasAtBottom = outputScroll.childCount == 0 ||
+                outputScroll.scrollY + outputScroll.height >=
+                outputScroll.getChildAt(0).height - dp(48)
+            output.text = value.ifBlank { "ממתין לפלט…" }
+            if (wasAtBottom) outputScroll.post { outputScroll.fullScroll(View.FOCUS_DOWN) }
+        }
+
+        vm.adb.running.observe(this) { ready ->
+            status.text = if (ready == true) "●  מחובר ומוכן לפקודות" else "○  אין חיבור ADB פעיל"
+            status.setTextColor(if (ready == true) Color.rgb(31, 170, 119) else palette.muted)
+            connectionSpinner.visibility = if (ready == true) View.GONE else View.VISIBLE
+            if (ready == true) {
+                val queued = pendingPresetCommand
+                if (!queued.isNullOrBlank()) {
+                    pendingPresetCommand = null
                     runCommand(queued)
                 }
             }
         }
+
         if (!vm.needsToPair()) vm.startADBServer()
     }
     override fun onResume(){
@@ -217,16 +367,11 @@ class MainActivity : AppCompatActivity() {
             vm.startADBServer()
         }
     }
-    private fun settingsGearButton(): TextView =
-        UiComponents.button(this, "⚙", palette.surfaceAlt, blue, palette.outline, 48, 1) {
-            startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
-        }
-
     private fun footerAction(title: String, action: () -> Unit): TextView =
         UiComponents.button(this, title, palette.surfaceAlt, palette.text, palette.outline, 52, 2, action)
 
     private fun tile(title: String, color: Int, action: () -> Unit): TextView =
-        UiComponents.button(this, title, color, Color.WHITE, null, 80, 2, action)
+        UiComponents.button(this, title, color, Color.WHITE, null, 64, 2, action)
 
     private fun installSelectedApks(uris:List<android.net.Uri>) {
         if(vm.adb.running.value!=true) {

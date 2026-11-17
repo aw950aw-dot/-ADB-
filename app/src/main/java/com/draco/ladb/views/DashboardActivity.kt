@@ -20,6 +20,8 @@ import com.draco.ladb.utils.ADB
 import com.draco.ladb.utils.UiTheme
 import com.draco.ladb.utils.UiComponents
 import com.draco.ladb.utils.PairingNotification
+import com.draco.ladb.utils.AppDrawer
+import androidx.drawerlayout.widget.DrawerLayout
 
 /** Redesigned landing screen. Existing LADB tools remain available as separate destinations. */
 class DashboardActivity : AppCompatActivity() {
@@ -53,6 +55,7 @@ class DashboardActivity : AppCompatActivity() {
         window.decorView.systemUiVisibility =
             if (palette.dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
 
+        val drawer = AppDrawer.create(this)
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
@@ -74,7 +77,7 @@ class DashboardActivity : AppCompatActivity() {
             setPadding(0, dp(3), 0, 0)
         })
         top.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        top.addView(settingsGearButton(), LinearLayout.LayoutParams(dp(48), dp(48)))
+        top.addView(AppDrawer.menuButton(this, drawer), LinearLayout.LayoutParams(dp(48), dp(48)))
         content.addView(top)
         content.addView(text(
             "כלי חיבור, גיבוי וניהול Android — במסך אחד.",
@@ -172,8 +175,9 @@ class DashboardActivity : AppCompatActivity() {
             setPadding(0, dp(18), 0, 0)
         })
         page.addView(scroll, LinearLayout.LayoutParams(-1, -1))
-        setContentView(page)
-        UiComponents.applySystemBars(this, page, palette)
+        AppDrawer.attach(this, drawer, page)
+        setContentView(drawer)
+        UiComponents.applySystemBars(this, drawer, palette)
     }
     private data class Tool(
         val title: String,
@@ -219,11 +223,6 @@ class DashboardActivity : AppCompatActivity() {
             addView(text(title, 18, palette.text, true))
         }
     }
-
-    private fun settingsGearButton(): TextView =
-        UiComponents.button(this, "⚙", palette.surface, palette.accent, palette.outline, 48, 1) {
-            startActivity(Intent(this@DashboardActivity, SettingsActivity::class.java))
-        }
 
     private fun requestNotificationsThenShowGuide() {
         val prefs = getSharedPreferences("first_run", MODE_PRIVATE)

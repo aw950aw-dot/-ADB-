@@ -163,6 +163,13 @@ class ADB(private val context: Context) {
                 val nowTime = System.currentTimeMillis()
                 val pendingResolves = DnsDiscover.pendingResolves.get()
 
+                // A discovered TLS endpoint is sufficient to proceed; do not wait
+                // for the full discovery window once the connection port is known.
+                if (DnsDiscover.adbPort != null) {
+                    debug("ADB TLS connection port discovered: " + DnsDiscover.adbPort)
+                    break
+                }
+
                 // Wait for pending DNS resolves to finish and the minimum scan time to elapse...
                 if (nowTime >= minDnsScanTime && !pendingResolves) {
                     debug("DNS resolver done...")

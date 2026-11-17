@@ -136,8 +136,8 @@ object PairingNotification {
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_baseline_adb_24)
                 .setContentTitle(
-                    if (success) "שיוך Wireless Debugging הושלם"
-                    else "שיוך Wireless Debugging נכשל"
+                    if (success) "ADB מחובר בהצלחה"
+                    else "חיבור ADB לא הושלם"
                 )
                 .setContentText(message)
                 // No Activity intent here either. A result notification must not

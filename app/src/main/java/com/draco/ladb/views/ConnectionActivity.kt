@@ -362,11 +362,16 @@ class ConnectionActivity : AppCompatActivity() {
         val seenAt = uiPrefs.getLong("seen_at", 0L)
         if (updatedAt > seenAt) {
             pairing = false
-            val success = prefs.getBoolean("last_success", false)
+            val paired = prefs.getBoolean("last_paired", false)
+            val connected = prefs.getBoolean("last_success", false)
             val message = prefs.getString("last_result", null)
             if (!message.isNullOrBlank()) status.text = message
             pairButton.isEnabled = vm.adb.running.value != true
-            pairButton.text = if (success) "השיוך הסתיים" else "נסה שוב"
+            pairButton.text = when {
+                connected -> "מחובר"
+                paired -> "השיוך הצליח — החיבור נכשל"
+                else -> "נסה שוב"
+            }
             uiPrefs.edit().putLong("seen_at", updatedAt).apply()
         }
     }

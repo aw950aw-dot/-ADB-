@@ -1,38 +1,43 @@
 package com.draco.ladb.views
 
-import androidx.appcompat.app.AppCompatActivity
-import android.os.Bundle
 import android.content.Intent
 import android.net.Uri
-import android.view.Gravity
-import android.view.View
-import android.widget.*
+import android.os.Bundle
 import android.graphics.Color
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
+import android.view.View
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.Spinner
+import android.widget.ArrayAdapter
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.drawerlayout.widget.DrawerLayout
 import com.draco.ladb.utils.ApiKeyVault
 import com.draco.ladb.utils.AiProviderClient
+import com.draco.ladb.utils.AppDrawer
 import com.draco.ladb.utils.RootAccessManager
 import com.draco.ladb.utils.UiTheme
 import com.draco.ladb.utils.UiComponents
 
 class SettingsActivity : AppCompatActivity() {
     private val palette get() = UiTheme.palette(this)
-    private val blue get() = palette.accent
     private val providerIds = listOf("gemini", "openai", "anthropic", "custom")
     private val providerNames = listOf("Google Gemini", "OpenAI", "Anthropic Claude", "ספק תואם OpenAI")
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun dp(value: Int) = UiComponents.dp(this, value)
 
-    private fun card(): LinearLayout = UiComponents.panel(this, palette, 16, 16)
+    private fun card(): LinearLayout = UiComponents.panel(this, palette, 15, 17)
 
-    private fun heading(text: String): TextView = TextView(this).apply {
-        this.text = text
-        textSize = 18f
-        setTextColor(palette.accent)
-        typeface = Typeface.DEFAULT_BOLD
-        gravity = Gravity.RIGHT
-        setPadding(0, dp(18), 0, dp(8))
-    }
+    private fun label(value: String, size: Int = 13, muted: Boolean = false): TextView =
+        TextView(this).apply {
+            text = value
+            textSize = size.toFloat()
+            setTextColor(if (muted) palette.muted else palette.text)
+            gravity = Gravity.RIGHT
+        }
 
     private fun textField(hintText: String, value: String = "", secret: Boolean = false): EditText =
         EditText(this).apply {
@@ -41,8 +46,14 @@ class SettingsActivity : AppCompatActivity() {
             gravity = Gravity.RIGHT
             setSingleLine(true)
             textDirection = View.TEXT_DIRECTION_LTR
-            if (secret) inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setTextColor(palette.text)
+            setHintTextColor(palette.muted)
+            background = UiComponents.shape(this@SettingsActivity, palette.inputBackground, 12, palette.outline)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            if (secret) {
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                    android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
         }
 
     private fun providerSpinner(selected: String): Spinner {
@@ -57,6 +68,64 @@ class SettingsActivity : AppCompatActivity() {
     private fun selectedProvider(spinner: Spinner): String =
         providerIds.getOrNull(spinner.selectedItemPosition) ?: "gemini"
 
+    private fun category(
+        parent: LinearLayout,
+        title: String,
+        subtitle: String,
+        initiallyExpanded: Boolean = false,
+        nested: Boolean = false,
+        build: LinearLayout.() -> Unit
+    ) {
+        val outer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = UiComponents.surface(
+                this@SettingsActivity,
+                if (nested) palette.surfaceAlt else palette.surface,
+                if (nested) 15 else 19,
+                palette.outline
+            )
+            setPadding(dp(if (nested) 12 else 15), dp(9), dp(if (nested) 12 else 15), dp(10))
+            elevation = if (nested) 0f else dp(1).toFloat()
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            isFocusable = true
+        }
+        val titleColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        titleColumn.addView(label(title, if (nested) 15 else 17).apply {
+            typeface = Typeface.DEFAULT_BOLD
+        })
+        titleColumn.addView(label(subtitle, 11, true).apply {
+            setPadding(0, dp(3), 0, 0)
+        })
+        header.addView(titleColumn, LinearLayout.LayoutParams(0, -2, 1f))
+        val arrow = label(if (initiallyExpanded) "⌃" else "⌄", 20).apply {
+            gravity = Gravity.CENTER
+            setTextColor(palette.accent)
+        }
+        header.addView(arrow, LinearLayout.LayoutParams(dp(32), dp(42)))
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(10), 0, dp(2))
+            visibility = if (initiallyExpanded) View.VISIBLE else View.GONE
+        }
+        build(body)
+        header.setOnClickListener {
+            val expand = body.visibility != View.VISIBLE
+            body.visibility = if (expand) View.VISIBLE else View.GONE
+            arrow.text = if (expand) "⌃" else "⌄"
+        }
+        outer.addView(header)
+        outer.addView(body)
+        parent.addView(outer, LinearLayout.LayoutParams(-1, -2).apply {
+            bottomMargin = dp(9)
+        })
+    }
+
     private fun refreshModelList(provider: String, key: String, modelField: EditText, status: TextView) {
         if (key.isBlank()) {
             Toast.makeText(this, "הזן מפתח API של הספק לפני טעינת מודלים", Toast.LENGTH_LONG).show()
@@ -68,7 +137,11 @@ class SettingsActivity : AppCompatActivity() {
                 val models = AiProviderClient.listModels(this, provider, key)
                 runOnUiThread {
                     if (models.isEmpty()) {
-                        status.text = if (provider == "custom") "בספק מותאם יש להזין מזהה מודל ידנית." else "לא נמצאו מודלים זמינים."
+                        status.text = if (provider == "custom") {
+                            "בספק מותאם יש להזין מזהה מודל ידנית."
+                        } else {
+                            "לא נמצאו מודלים זמינים."
+                        }
                         return@runOnUiThread
                     }
                     status.text = "נמצאו " + models.size + " מודלים זמינים. בחר אחד מהרשימה."
@@ -79,9 +152,9 @@ class SettingsActivity : AppCompatActivity() {
                         .setNegativeButton("סגור", null)
                         .show()
                 }
-            } catch (e: Exception) {
+            } catch (error: Exception) {
                 runOnUiThread {
-                    status.text = "טעינת המודלים נכשלה: " + (e.message ?: "שגיאה")
+                    status.text = "טעינת המודלים נכשלה: " + (error.message ?: "שגיאה")
                 }
             }
         }.start()
@@ -90,278 +163,316 @@ class SettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         UiTheme.applySavedMode(this)
         super.onCreate(savedInstanceState)
-        window.statusBarColor = palette.statusBar
-        window.navigationBarColor = palette.navigationBar
-        window.decorView.systemUiVisibility = if (palette.dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+
         val prefs = getSharedPreferences("ai_settings", 0)
-        val root = LinearLayout(this).apply {
+        val drawer = AppDrawer.create(this)
+        val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(dp(18), dp(18), dp(18), dp(22))
+            setPadding(dp(18), dp(14), dp(18), dp(22))
             setBackgroundColor(palette.background)
         }
-        root.addView(TextView(this).apply {
-            text = "הגדרות"
-            textSize = 27f
-            setTextColor(palette.text)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.RIGHT
-        })
-        root.addView(heading("מראה האפליקציה"))
-        root.addView(card().apply {
-            addView(Button(this@SettingsActivity).apply {
-                text = if (palette.dark) "עבור לעיצוב בהיר" else "עבור לעיצוב כהה"
-                isAllCaps = false
-                setOnClickListener {
-                    UiTheme.setDarkMode(this@SettingsActivity, !UiTheme.isDark(this@SettingsActivity))
-                }
-            })
-        })
+        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        scroll.addView(root)
 
-        root.addView(heading("הרשאת Root"))
-        val rootStatus = TextView(this).apply {
-            text = if (RootAccessManager.isMarkedGranted(this@SettingsActivity)) {
-                "נשמרה הרשאת Root. לחץ על בדיקה כדי לוודא שהיא עדיין פעילה."
-            } else {
-                "הרשאת Root לא הוגדרה. ניתן לבקש גישה דרך Magisk, KernelSU או מנהל Root אחר."
-            }
-            textSize = 12f
-            setTextColor(palette.muted)
-            gravity = Gravity.RIGHT
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
-        root.addView(card().apply {
+        header.addView(AppDrawer.menuButton(this, drawer), LinearLayout.LayoutParams(dp(48), dp(48)))
+        header.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(label("הגדרות", 23).apply { typeface = Typeface.DEFAULT_BOLD })
+            addView(label("ניהול והתאמה אישית של ADB SMART", 11, true))
+        }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(10) })
+        root.addView(header)
+        root.addView(label("ההגדרות מחולקות לנושאים. פתח קטגוריה כדי לראות את האפשרויות שבתוכה.", 12, true)
+            .apply { setPadding(0, dp(8), 0, dp(14)) })
+
+        category(root, "מראה האפליקציה", "ערכת צבעים כהה או בהירה", initiallyExpanded = true) {
+            addView(label(
+                "בחר את המראה הנוח לך. השינוי חל על כל המסכים באפליקציה.",
+                12,
+                true
+            ))
+            addView(UiComponents.button(
+                this@SettingsActivity,
+                if (palette.dark) "עבור לעיצוב בהיר" else "עבור לעיצוב כהה",
+                palette.accent,
+                Color.WHITE,
+                null,
+                48,
+                1
+            ) {
+                UiTheme.setDarkMode(this@SettingsActivity, !UiTheme.isDark(this@SettingsActivity))
+            }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(12) })
+        }
+
+        category(root, "הרשאות מערכת", "בדיקת הרשאת Root לניהול נתונים ואפליקציות") {
+            val rootStatus = label(
+                if (RootAccessManager.isMarkedGranted(this@SettingsActivity)) {
+                    "נשמרה הרשאת Root. לחץ על הבדיקה כדי לוודא שהיא עדיין פעילה."
+                } else {
+                    "הרשאת Root לא הוגדרה. אפשר לבקש אותה דרך Magisk, KernelSU או מנהל Root אחר."
+                },
+                12,
+                true
+            )
             addView(rootStatus)
-            addView(Button(this@SettingsActivity).apply {
-                text = "בדוק / בקש הרשאת Root"
-                isAllCaps = false
-                setOnClickListener {
-                    isEnabled = false
-                    text = "בודק הרשאת Root…"
-                    Thread {
-                        val result = runCatching { RootAccessManager.requestAccess(this@SettingsActivity) }
-                        runOnUiThread {
-                            isEnabled = true
-                            text = "בדוק / בקש הרשאת Root"
-                            val access = result.getOrNull()
-                            rootStatus.text = when {
-                                access?.granted == true -> "✓ הרשאת Root פעילה עבור ADB חכם.\n" + access.output
-                                access != null -> "לא התקבלה הרשאת Root.\n" + access.output
-                                else -> "לא ניתן לבדוק Root: " + (result.exceptionOrNull()?.message ?: "שגיאה")
-                            }
-                            rootStatus.setTextColor(if (access?.granted == true) Color.rgb(24, 150, 105) else palette.muted)
-                        }
-                    }.start()
-                }
-            })
-            addView(TextView(this@SettingsActivity).apply {
-                text = "יש לאשר את הבקשה בחלון מנהל ה־Root. ההרשאה ניתנת לאפליקציה עצמה; ניתן לבטל אותה בכל עת דרך מנהל ה־Root."
-                textSize = 11f
-                setTextColor(palette.muted)
-                gravity = Gravity.RIGHT
-            })
-        })
-
-        root.addView(heading("ספקי AI ומפתחות API"))
-
-        val keys = linkedMapOf<String, EditText>()
-        val providerFields = listOf(
-            Triple("gemini", "Google Gemini API Key", ApiKeyVault.read(this, "gemini")),
-            Triple("openai", "OpenAI API Key", ApiKeyVault.read(this, "openai")),
-            Triple("anthropic", "Anthropic API Key", ApiKeyVault.read(this, "anthropic")),
-            Triple("custom", "מפתח API של ספק מותאם", ApiKeyVault.read(this, "custom"))
-        )
-        root.addView(card().apply {
-            addView(TextView(this@SettingsActivity).apply {
-                text = "כל מפתח נשמר אוטומטית בזמן ההקלדה ומוצפן במכשיר."
-                textSize = 12f
-                setTextColor(palette.muted)
-                gravity = Gravity.RIGHT
-            })
-            providerFields.forEach { (id, label, value) ->
-                addView(TextView(this@SettingsActivity).apply {
-                    text = label
-                    textSize = 13f
-                    setTextColor(palette.text)
-                    gravity = Gravity.RIGHT
-                    setPadding(0, dp(10), 0, 0)
-                })
-                val input = textField(label, value, true)
-                input.addTextChangedListener(object : android.text.TextWatcher {
-                    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-                    override fun afterTextChanged(s: android.text.Editable?) {
-                        runCatching {
-                            ApiKeyVault.save(this@SettingsActivity, s?.toString()?.trim().orEmpty(), id)
-                        }
+            lateinit var rootButton: TextView
+            rootButton = UiComponents.button(
+                this@SettingsActivity,
+                "בדוק / בקש הרשאת Root",
+                palette.accent,
+                Color.WHITE,
+                null,
+                48,
+                2
+            ) {
+                rootButton.isEnabled = false
+                rootButton.text = "בודק הרשאת Root…"
+                Thread {
+                    val result = runCatching {
+                        RootAccessManager.requestAccess(this@SettingsActivity)
                     }
-                })
-                keys[id] = input
-                addView(input)
+                    runOnUiThread {
+                        rootButton.isEnabled = true
+                        rootButton.text = "בדוק / בקש הרשאת Root"
+                        val access = result.getOrNull()
+                        rootStatus.text = when {
+                            access?.granted == true -> "✓ הרשאת Root פעילה עבור ADB SMART.\n" + access.output
+                            access != null -> "לא התקבלה הרשאת Root.\n" + access.output
+                            else -> "לא ניתן לבדוק Root: " +
+                                (result.exceptionOrNull()?.message ?: "שגיאה")
+                        }
+                        rootStatus.setTextColor(
+                            if (access?.granted == true) Color.rgb(24, 150, 105) else palette.muted
+                        )
+                    }
+                }.start()
             }
-        })
-
-        root.addView(heading("מודל ראשי"))
-        val primaryProvider = providerSpinner(prefs.getString("primary_provider", "gemini") ?: "gemini")
-        val primaryModel = textField(
-            "מזהה מודל ראשי",
-            prefs.getString("primary_model", prefs.getString("model", "gemini-3.8-flash")) ?: "gemini-3.8-flash"
-        )
-        val primaryStatus = TextView(this).apply {
-            text = "בחר ספק ומודל. אפשר לטעון את רשימת המודלים האמיתית מהחשבון."
-            textSize = 12f
-            setTextColor(palette.muted)
-            gravity = Gravity.RIGHT
+            addView(rootButton, LinearLayout.LayoutParams(-1, dp(48)).apply {
+                topMargin = dp(12)
+            })
+            addView(label(
+                "יש לאשר את בקשת הגישה בחלון מנהל ה־Root. ניתן לבטל את ההרשאה בכל עת דרך מנהל ה־Root.",
+                11,
+                true
+            ).apply { setPadding(0, dp(7), 0, 0) })
         }
-        root.addView(card().apply {
-            addView(TextView(this@SettingsActivity).apply { text = "ספק ראשי"; gravity = Gravity.RIGHT; setTextColor(palette.text) })
-            addView(primaryProvider)
-            addView(primaryModel)
-            addView(Button(this@SettingsActivity).apply {
-                text = "טען מודלים זמינים ובחר"
-                isAllCaps = false
-                setOnClickListener {
+
+        category(root, "בינה מלאכותית", "מפתחות, מודלים וספקי AI") {
+            val keys = linkedMapOf<String, EditText>()
+            val providerFields = listOf(
+                Triple("gemini", "Google Gemini API Key", ApiKeyVault.read(this, "gemini")),
+                Triple("openai", "OpenAI API Key", ApiKeyVault.read(this, "openai")),
+                Triple("anthropic", "Anthropic Claude API Key", ApiKeyVault.read(this, "anthropic")),
+                Triple("custom", "מפתח API של ספק מותאם", ApiKeyVault.read(this, "custom"))
+            )
+
+            category(this, "מפתחות API", "הזנת מפתחות לספקי הבינה המלאכותית", initiallyExpanded = true, nested = true) {
+                addView(label("כל מפתח נשמר אוטומטית ומוצפן במכשיר.", 11, true))
+                providerFields.forEach { (id, fieldLabel, value) ->
+                    addView(label(fieldLabel, 12).apply {
+                        typeface = Typeface.DEFAULT_BOLD
+                        setPadding(0, dp(10), 0, dp(3))
+                    })
+                    val input = textField(fieldLabel, value, true)
+                    input.addTextChangedListener(object : android.text.TextWatcher {
+                        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                        override fun afterTextChanged(s: android.text.Editable?) {
+                            runCatching {
+                                ApiKeyVault.save(this@SettingsActivity, s?.toString()?.trim().orEmpty(), id)
+                            }
+                        }
+                    })
+                    keys[id] = input
+                    addView(input, LinearLayout.LayoutParams(-1, dp(50)))
+                }
+            }
+
+            category(this, "מודלים ראשי וגיבוי", "בחירת ספק ומודל לכל תפקיד", nested = true) {
+                val primaryProvider = providerSpinner(
+                    prefs.getString("primary_provider", "gemini") ?: "gemini"
+                )
+                val primaryModel = textField(
+                    "מזהה מודל ראשי",
+                    prefs.getString("primary_model", prefs.getString("model", "gemini-3.8-flash"))
+                        ?: "gemini-3.8-flash"
+                )
+                val primaryStatus = label("אפשר לטעון את רשימת המודלים הזמינה בחשבון.", 11, true)
+                addView(label("ספק ראשי", 12).apply { setPadding(0, dp(7), 0, dp(3)) })
+                addView(primaryProvider)
+                addView(primaryModel, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(6) })
+                addView(UiComponents.button(
+                    this@SettingsActivity,
+                    "טען מודלים זמינים למודל הראשי",
+                    palette.surfaceAlt,
+                    palette.text,
+                    palette.outline,
+                    44,
+                    2
+                ) {
                     val provider = selectedProvider(primaryProvider)
-                    refreshModelList(provider, keys[provider]?.text?.toString()?.trim().orEmpty(), primaryModel, primaryStatus)
-                }
-            })
-            addView(primaryStatus)
-        })
+                    refreshModelList(
+                        provider,
+                        keys[provider]?.text?.toString()?.trim().orEmpty(),
+                        primaryModel,
+                        primaryStatus
+                    )
+                }, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(7) })
+                addView(primaryStatus.apply { setPadding(0, dp(5), 0, 0) })
 
-        root.addView(heading("מודל גיבוי אוטומטי"))
-        val fallbackProvider = providerSpinner(prefs.getString("fallback_provider", "gemini") ?: "gemini")
-        val fallbackModel = textField(
-            "מזהה מודל גיבוי",
-            prefs.getString("fallback_model", "gemini-3.7-flash") ?: "gemini-3.7-flash"
-        )
-        val fallbackStatus = TextView(this).apply {
-            text = "כאשר המודל הראשי עמוס או מחזיר שגיאת שרת זמנית, האפליקציה תנסה את מודל הגיבוי."
-            textSize = 12f
-            setTextColor(palette.muted)
-            gravity = Gravity.RIGHT
-        }
-        val extraModels = textField(
-            "מודלי גיבוי נוספים, מופרדים בפסיקים",
-            prefs.getString("extra_fallback_models", "") ?: ""
-        )
-        root.addView(card().apply {
-            addView(TextView(this@SettingsActivity).apply { text = "ספק גיבוי"; gravity = Gravity.RIGHT; setTextColor(palette.text) })
-            addView(fallbackProvider)
-            addView(fallbackModel)
-            addView(Button(this@SettingsActivity).apply {
-                text = "טען מודלי גיבוי זמינים"
-                isAllCaps = false
-                setOnClickListener {
+                val fallbackProvider = providerSpinner(
+                    prefs.getString("fallback_provider", "gemini") ?: "gemini"
+                )
+                val fallbackModel = textField(
+                    "מזהה מודל גיבוי",
+                    prefs.getString("fallback_model", "gemini-3.7-flash") ?: "gemini-3.7-flash"
+                )
+                val fallbackStatus = label(
+                    "המודל הזה יופעל כאשר המודל הראשי אינו זמין.",
+                    11,
+                    true
+                )
+                addView(label("ספק גיבוי", 12).apply {
+                    typeface = Typeface.DEFAULT_BOLD
+                    setPadding(0, dp(14), 0, dp(3))
+                })
+                addView(fallbackProvider)
+                addView(fallbackModel, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(6) })
+                addView(UiComponents.button(
+                    this@SettingsActivity,
+                    "טען מודלים זמינים למודל הגיבוי",
+                    palette.surfaceAlt,
+                    palette.text,
+                    palette.outline,
+                    44,
+                    2
+                ) {
                     val provider = selectedProvider(fallbackProvider)
-                    refreshModelList(provider, keys[provider]?.text?.toString()?.trim().orEmpty(), fallbackModel, fallbackStatus)
-                }
-            })
-            addView(fallbackStatus)
-            addView(TextView(this@SettingsActivity).apply {
-                text = "אפשר להוסיף כמה מזהי מודלים מאותו ספק. האפליקציה תנסה אותם לפי הסדר."
-                textSize = 12f
-                setTextColor(palette.muted)
-                gravity = Gravity.RIGHT
-            })
-            addView(extraModels)
-        })
+                    refreshModelList(
+                        provider,
+                        keys[provider]?.text?.toString()?.trim().orEmpty(),
+                        fallbackModel,
+                        fallbackStatus
+                    )
+                }, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(7) })
+                addView(fallbackStatus.apply { setPadding(0, dp(5), 0, dp(3)) })
 
-        root.addView(heading("ספק API מותאם"))
-        val customEndpoint = textField(
-            "כתובת HTTPS מלאה, לדוגמה https://api.example.com/v1/chat/completions",
-            prefs.getString("custom_endpoint", "https://api.openai.com/v1/chat/completions") ?: ""
-        )
-        root.addView(card().apply {
-            addView(TextView(this@SettingsActivity).apply {
-                text = "מאפשר להשתמש בשירותים נוספים שתומכים בממשק OpenAI Chat Completions."
-                textSize = 12f
-                setTextColor(Color.rgb(85, 105, 130))
-                gravity = Gravity.RIGHT
-            })
-            addView(customEndpoint)
-        })
+                val extraModels = textField(
+                    "מודלי גיבוי נוספים, מופרדים בפסיקים",
+                    prefs.getString("extra_fallback_models", "") ?: ""
+                )
+                addView(extraModels, LinearLayout.LayoutParams(-1, dp(50)).apply {
+                    topMargin = dp(8)
+                })
 
-        root.addView(Button(this).apply {
-            text = "שמירת הגדרות"
-            isAllCaps = false
-            setOnClickListener {
-                val chosenPrimaryProvider = selectedProvider(primaryProvider)
-                val chosenPrimaryModel = primaryModel.text.toString().trim()
-                val chosenFallbackProvider = selectedProvider(fallbackProvider)
-                val chosenFallbackModel = fallbackModel.text.toString().trim()
-                if (chosenPrimaryModel.isBlank() || chosenFallbackModel.isBlank()) {
-                    Toast.makeText(this@SettingsActivity, "יש להגדיר מודל ראשי ומודל גיבוי", Toast.LENGTH_LONG).show()
-                    return@setOnClickListener
-                }
-                prefs.edit()
-                    .putString("primary_provider", chosenPrimaryProvider)
-                    .putString("primary_model", chosenPrimaryModel)
-                    .putString("model", chosenPrimaryModel)
-                    .putString("fallback_provider", chosenFallbackProvider)
-                    .putString("fallback_model", chosenFallbackModel)
-                    .putString("extra_fallback_models", extraModels.text.toString().trim())
-                    .putString("custom_endpoint", customEndpoint.text.toString().trim())
-                    .apply()
-                Toast.makeText(this@SettingsActivity, "הגדרות AI נשמרו", Toast.LENGTH_SHORT).show()
-                finish()
+                val customEndpoint = textField(
+                    "כתובת HTTPS של Chat Completions",
+                    prefs.getString(
+                        "custom_endpoint",
+                        "https://api.openai.com/v1/chat/completions"
+                    ) ?: ""
+                )
+                addView(label("כתובת API מותאמת", 12).apply {
+                    typeface = Typeface.DEFAULT_BOLD
+                    setPadding(0, dp(14), 0, dp(3))
+                })
+                addView(customEndpoint, LinearLayout.LayoutParams(-1, dp(50)))
+
+                addView(UiComponents.button(
+                    this@SettingsActivity,
+                    "שמור הגדרות מודלים",
+                    palette.accent,
+                    Color.WHITE,
+                    null,
+                    48,
+                    1
+                ) {
+                    val chosenPrimaryProvider = selectedProvider(primaryProvider)
+                    val chosenPrimaryModel = primaryModel.text.toString().trim()
+                    val chosenFallbackProvider = selectedProvider(fallbackProvider)
+                    val chosenFallbackModel = fallbackModel.text.toString().trim()
+                    if (chosenPrimaryModel.isBlank() || chosenFallbackModel.isBlank()) {
+                        Toast.makeText(
+                            this@SettingsActivity,
+                            "יש להגדיר מודל ראשי ומודל גיבוי",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        prefs.edit()
+                            .putString("primary_provider", chosenPrimaryProvider)
+                            .putString("primary_model", chosenPrimaryModel)
+                            .putString("model", chosenPrimaryModel)
+                            .putString("fallback_provider", chosenFallbackProvider)
+                            .putString("fallback_model", chosenFallbackModel)
+                            .putString("extra_fallback_models", extraModels.text.toString().trim())
+                            .putString("custom_endpoint", customEndpoint.text.toString().trim())
+                            .apply()
+                        Toast.makeText(this@SettingsActivity, "הגדרות המודלים נשמרו", Toast.LENGTH_SHORT).show()
+                    }
+                }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(14) })
             }
-        })
 
-        root.addView(heading("יצירת מפתח Gemini"))
-        root.addView(card().apply {
-            addView(TextView(this@SettingsActivity).apply {
-                text = "אפשר ליצור או לנהל מפתח API אישי ב־Google AI Studio."
-                textSize = 13f
-                setTextColor(palette.muted)
-                gravity = Gravity.RIGHT
-            })
-            addView(Button(this@SettingsActivity).apply {
-                text = "פתיחת Google AI Studio – יצירת API Key"
-                isAllCaps = false
-                setOnClickListener {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/app/apikey")))
-                }
-            })
-        })
-
-        root.addView(heading("גיבוי נתוני ADB SMART"))
-        root.addView(card().apply {
-            addView(TextView(this@SettingsActivity).apply {
-                text = "גיבוי מוצפן של ההגדרות, מפתחות ה־API, הקבצים ומסדי הנתונים. אפשר לשחזר אחרי התקנה מחדש באמצעות הסיסמה שבחרת."
-                textSize = 12f
-                setTextColor(palette.muted)
-                gravity = Gravity.RIGHT
-            })
-            addView(Button(this@SettingsActivity).apply {
-                text = "גיבוי או שחזור נתוני האפליקציה"
-                isAllCaps = false
-                setOnClickListener {
-                    startActivity(Intent(this@SettingsActivity, AppDataBackupActivity::class.java))
-                }
-            })
-        })
-
-        root.addView(heading("אודות"))
-        root.addView(card().apply {
-            addView(TextView(this@SettingsActivity).apply {
-                text = "האפליקציה פותחה על ידי @האמריקאי מפורום מתמחים טופ."
-                textSize = 15f
-                setTextColor(palette.text)
-                gravity = Gravity.RIGHT
-            })
-            addView(Button(this@SettingsActivity).apply {
-                text = "לפרופיל @האמריקאי במתמחים טופ"
-                isAllCaps = false
-                setOnClickListener {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://mitmachim.top/user/%D7%94%D7%90%D7%9E%D7%A8%D7%99%D7%A7%D7%90%D7%99")))
-                }
-            })
-        })
-
-        val pageScroll = ScrollView(this).apply {
-            isFillViewport = true
-            addView(root)
+            category(this, "יצירת מפתח Gemini", "פתיחת Google AI Studio", nested = true) {
+                addView(label("אפשר ליצור או לנהל מפתח API אישי ב־Google AI Studio.", 12, true))
+                addView(UiComponents.button(
+                    this@SettingsActivity,
+                    "פתח Google AI Studio",
+                    palette.surfaceAlt,
+                    palette.text,
+                    palette.outline,
+                    48,
+                    1
+                ) {
+                    startActivity(Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://aistudio.google.com/app/apikey")
+                    ))
+                }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
+            }
         }
-        setContentView(pageScroll)
-        UiComponents.applySystemBars(this, pageScroll, palette)
+
+        category(root, "גיבוי ושחזור נתוני האפליקציה", "שמירת הגדרות ומפתחות בקובץ מוצפן") {
+            addView(label(
+                "כאן אפשר ליצור גיבוי מוצפן של ההגדרות, מפתחות ה־API, הקבצים ומסדי הנתונים של ADB SMART.",
+                12,
+                true
+            ))
+            addView(UiComponents.button(
+                this@SettingsActivity,
+                "פתח גיבוי או שחזור נתוני ADB SMART",
+                palette.accent,
+                Color.WHITE,
+                null,
+                48,
+                2
+            ) {
+                startActivity(Intent(this@SettingsActivity, AppDataBackupActivity::class.java))
+            }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(12) })
+        }
+
+        category(root, "אודות", "גרסה, פרטי פיתוח וקרדיטים") {
+            addView(label("גרסה " + com.draco.ladb.BuildConfig.VERSION_NAME, 13))
+            addView(UiComponents.button(
+                this@SettingsActivity,
+                "פתח מסך אודות",
+                palette.surfaceAlt,
+                palette.text,
+                palette.outline,
+                46,
+                1
+            ) {
+                startActivity(Intent(this@SettingsActivity, AboutActivity::class.java))
+            }, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(10) })
+        }
+
+        page.addView(scroll, LinearLayout.LayoutParams(-1, -1))
+        AppDrawer.attach(this, drawer, page)
+        setContentView(drawer)
+        UiComponents.applySystemBars(this, drawer, palette)
     }
 }

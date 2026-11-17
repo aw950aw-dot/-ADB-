@@ -14,8 +14,8 @@ import com.draco.ladb.utils.PairingNotification
 import com.draco.ladb.utils.PairingPortDiscovery
 
 /**
- * Performs pairing and ADB startup without ever opening or bringing an Activity
- * to the foreground. Both notification and manual-entry flows use this service.
+ * Performs pairing and ADB startup without bringing an Activity above Android Settings.
+ * A successful pair is recorded separately from a verified live ADB connection.
  */
 class PairingService : Service() {
     companion object {
@@ -50,13 +50,15 @@ class PairingService : Service() {
             return START_NOT_STICKY
         }
         if (workStarted) {
-            PairingNotification.show(this, "תהליך שיוך כבר פועל ברקע. השאר את מסך ההגדרות פתוח.")
+            PairingNotification.show(this, "תהליך שיוך כבר פועל ברקע. השאר את דף Wireless Debugging פתוח.")
             return START_NOT_STICKY
         }
 
         workStarted = true
         getSharedPreferences(STATE_PREFS, MODE_PRIVATE).edit {
             putBoolean("working", true)
+            putBoolean("last_paired", false)
+            putBoolean("last_success", false)
             putLong("started_at", System.currentTimeMillis())
         }
 
@@ -69,6 +71,7 @@ class PairingService : Service() {
             workStarted = false
             getSharedPreferences(STATE_PREFS, MODE_PRIVATE).edit {
                 putBoolean("working", false)
+                putBoolean("last_paired", false)
                 putBoolean("last_success", false)
                 putString("last_result", "Android לא אפשר להפעיל שירות שיוך ברקע: " +
                     (error.message ?: "שגיאת הרשאה"))
@@ -95,9 +98,10 @@ class PairingService : Service() {
 
     private fun runPairing(code: String, requestedPort: Int?) {
         var paired = false
-        var resultMessage = "השיוך נכשל. בדוק שהקוד עדיין בתוקף ונסה שוב."
+        var connected = false
+        var resultMessage = "השיוך והחיבור לא הושלמו."
         try {
-            val port = requestedPort
+            val pairingPort = requestedPort
                 ?: PairingPortDiscovery(applicationContext).findPairingPort(35_000L)
                 ?: error(
                     "לא נמצא פורט שיוך. השאר את חלון „שיוך באמצעות קוד” פתוח, " +
@@ -105,7 +109,7 @@ class PairingService : Service() {
                 )
 
             val adb = ADB.getInstance(applicationContext)
-            if (!adb.pair(port.toString(), code)) {
+            if (!adb.pair(pairingPort.toString(), code)) {
                 error("השיוך נכשל. בדוק שהקוד עדיין בתוקף ונסה שוב.")
             }
             paired = true
@@ -114,26 +118,60 @@ class PairingService : Service() {
                 putBoolean(getString(R.string.paired_key), true)
             }
 
+            // A pairing port is not the ADB connection port. Start a fresh
+            // _adb-tls-connect discovery and require a real connect endpoint.
             val nsd = getSystemService(NSD_SERVICE) as NsdManager
-            DnsDiscover.getInstance(applicationContext, nsd).scanAdbPorts()
-            val connected = adb.initServer(skipWirelessReset = true)
-            if (connected) adb.ensureShellDeathMonitor()
+            val discovery = DnsDiscover.getInstance(applicationContext, nsd)
+            discovery.stopScan()
+            discovery.scanAdbPorts()
+            val connectPort = waitForConnectPort(12_000L)
+                ?: error(
+                    "השיוך הצליח, אך Android לא פרסם פורט חיבור ADB. " +
+                        "השאר את Wireless Debugging פעיל ונסה להתחבר מחדש."
+                )
+            Log.i(TAG, "Found ADB TLS connect port $connectPort")
 
-            resultMessage = if (connected) {
-                "השיוך והחיבור ל־ADB הושלמו. אפשר לחזור לאפליקציה כשנוח לך."
-            } else {
-                "השיוך הצליח, אבל החיבור ל־ADB עדיין לא הושלם. אפשר לנסות להתחבר מתוך האפליקציה."
+            val initialized = adb.initServer(skipWirelessReset = true)
+            if (!initialized) {
+                error(
+                    "השיוך הצליח, אבל הפעלת ADB נכשלה. " +
+                        "נמצא פורט חיבור $connectPort אך לא התקבל התקן ADB מאושר."
+                )
             }
+
+            // initServer can also run in non-ADB-shell mode. Verify an authorized
+            // device explicitly before reporting the connection as successful.
+            val devices = adb.getDevices()
+            val localDevices = devices.filter {
+                it.startsWith("localhost:") || it.startsWith("127.0.0.1:")
+            }
+            if (localDevices.isEmpty()) {
+                error(
+                    "השיוך הצליח, אך לא נמצא התקן ADB מקומי מאושר. " +
+                        "החיבור לפורט $connectPort לא הושלם. התקנים שנמצאו: " +
+                        devices.joinToString(", ").ifBlank { "אין" }
+                )
+            }
+
+            connected = true
+            adb.ensureShellDeathMonitor()
+            resultMessage = "השיוך והחיבור ל־ADB הושלמו. התקן מקומי מאושר: " +
+                localDevices.joinToString(", ")
             PairingNotification.showResult(applicationContext, true, resultMessage)
         } catch (error: Exception) {
-            Log.e(TAG, "Wireless Debugging pairing failed", error)
-            resultMessage = error.message
-                ?: "השיוך נכשל. בדוק שהקוד והפורט עדיין בתוקף ונסה שוב."
-            PairingNotification.show(applicationContext, resultMessage)
+            Log.e(TAG, "Wireless Debugging pairing/connection failed", error)
+            resultMessage = error.message ?: "תהליך השיוך או החיבור נכשל."
+            PairingNotification.showResult(
+                applicationContext,
+                false,
+                if (paired) "השיוך הראשוני הצליח, אבל ADB לא התחבר: $resultMessage"
+                else "השיוך נכשל: $resultMessage"
+            )
         } finally {
             getSharedPreferences(STATE_PREFS, MODE_PRIVATE).edit {
                 putBoolean("working", false)
-                putBoolean("last_success", paired)
+                putBoolean("last_paired", paired)
+                putBoolean("last_success", connected)
                 putString("last_result", resultMessage)
                 putLong("updated_at", System.currentTimeMillis())
             }
@@ -145,5 +183,20 @@ class PairingService : Service() {
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelfResult(stopId)
         }
+    }
+
+    private fun waitForConnectPort(timeoutMillis: Long): Int? {
+        val deadline = System.currentTimeMillis() + timeoutMillis.coerceAtLeast(1_000L)
+        while (System.currentTimeMillis() < deadline) {
+            val port = DnsDiscover.adbPort
+            if (port != null && port in 1..65535) return port
+            try {
+                Thread.sleep(200L)
+            } catch (interrupted: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return null
+            }
+        }
+        return DnsDiscover.adbPort?.takeIf { it in 1..65535 }
     }
 }
