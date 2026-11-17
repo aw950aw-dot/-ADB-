@@ -177,9 +177,9 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 addView(footerAction("נקה פלט") { vm.clearOutputText() },
-                    LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(3), 0, dp(3), 0) })
+                    LinearLayout.LayoutParams(0, dp(52), 1f).apply { setMargins(dp(3), 0, dp(3), 0) })
                 addView(footerAction("היסטוריית פקודות") { showHistory() },
-                    LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(3), 0, dp(3), 0) })
+                    LinearLayout.LayoutParams(0, dp(52), 1f).apply { setMargins(dp(3), 0, dp(3), 0) })
             })
         })
         val pageScroll = ScrollView(this).apply { isFillViewport = true; addView(root) }
@@ -223,7 +223,7 @@ class MainActivity : AppCompatActivity() {
         }
 
     private fun footerAction(title: String, action: () -> Unit): TextView =
-        UiComponents.button(this, title, palette.surfaceAlt, palette.text, palette.outline, 48, 1, action)
+        UiComponents.button(this, title, palette.surfaceAlt, palette.text, palette.outline, 52, 2, action)
 
     private fun tile(title: String, color: Int, action: () -> Unit): TextView =
         UiComponents.button(this, title, color, Color.WHITE, null, 80, 2, action)
