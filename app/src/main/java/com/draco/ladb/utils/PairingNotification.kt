@@ -16,15 +16,14 @@ import androidx.core.content.ContextCompat
 import com.draco.ladb.R
 
 /**
- * Notification-only pairing flow.
- *
- * The reply PendingIntent targets a BroadcastReceiver and never launches an Activity.
- * Keeping the notification free of a content PendingIntent prevents tapping the
- * notification surface from unexpectedly bringing the app over Android Settings.
+ * Inline pairing-code notification. The reply is a broadcast and never launches an Activity.
+ * The discovered endpoint is attached so ADB can pair immediately without a second mDNS scan.
  */
 object PairingNotification {
     const val INPUT_KEY = "wireless_pairing_code"
     const val ACTION_PAIR = "com.aw950aw.adbsmart.ACTION_PAIR_FROM_NOTIFICATION"
+    const val EXTRA_PAIRING_PORT = "pairing_port"
+    const val EXTRA_PAIRING_HOST = "pairing_host"
     private const val CHANNEL_ID = "wireless_debugging_pairing_v3"
     private const val NOTIFICATION_ID = 4106
     const val WORKING_NOTIFICATION_ID = 4107
@@ -56,16 +55,19 @@ object PairingNotification {
     @SuppressLint("MissingPermission")
     fun show(
         context: Context,
-        statusText: String = "הקלד את קוד 6 הספרות ולחץ „שלח קוד והתחבר”"
+        statusText: String = "הקלד את קוד 6 הספרות ולחץ „שלח קוד והתחבר”",
+        pairingPort: Int? = null,
+        pairingHost: String? = null
     ) {
         if (!allowed(context)) return
         try {
             ensureChannel(context)
 
-            // Mutable is required by Android RemoteInput. It remains an explicit
-            // broadcast PendingIntent, not an Activity PendingIntent.
+            // RemoteInput requires a mutable explicit broadcast PendingIntent.
             val replyIntent = Intent(context, PairingReplyReceiver::class.java).apply {
                 action = ACTION_PAIR
+                if (pairingPort != null) putExtra(EXTRA_PAIRING_PORT, pairingPort)
+                if (!pairingHost.isNullOrBlank()) putExtra(EXTRA_PAIRING_HOST, pairingHost)
             }
             val replyPendingIntent = PendingIntent.getBroadcast(
                 context,
@@ -93,14 +95,14 @@ object PairingNotification {
                 .setSmallIcon(R.drawable.ic_baseline_adb_24)
                 .setContentTitle("שיוך Wireless Debugging")
                 .setContentText(statusText)
-                // Deliberately no content PendingIntent: the notification itself
-                // must not navigate away from the Android Settings screen.
                 .setPriority(NotificationCompat.PRIORITY_MAX)
-                .setCategory(NotificationCompat.CATEGORY_SERVICE)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                .setVisibility(android.app.Notification.VISIBILITY_PUBLIC)
                 .setAutoCancel(false)
-                .setOngoing(true)
-                .setOnlyAlertOnce(true)
+                // Allow swipe-to-dismiss; this is not a permanent foreground notification.
+                .setOngoing(false)
+                // Re-alert when the pairing service is discovered while Settings is open.
+                .setOnlyAlertOnce(false)
                 .addAction(action)
                 .build()
 
@@ -114,12 +116,13 @@ object PairingNotification {
         ensureChannel(context)
         return NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_baseline_adb_24)
-            .setContentTitle("משייך את המכשיר ברקע")
-            .setContentText("מסך ההגדרות נשאר פתוח. מאתר פורט ומבצע שיוך ל־ADB…")
+            .setContentTitle("מאתר את שירות הצימוד")
+            .setContentText("כשחלון הצימוד ייפתח, תופיע התראת הזנת קוד.")
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
+            // Foreground work continues even if the user swipes this notification away.
+            .setOngoing(false)
+            .setOnlyAlertOnce(false)
             .build()
     }
 
@@ -140,8 +143,6 @@ object PairingNotification {
                     else "חיבור ADB לא הושלם"
                 )
                 .setContentText(message)
-                // No Activity intent here either. A result notification must not
-                // pull the app in front of Settings when the background work ends.
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_STATUS)
                 .setAutoCancel(true)
