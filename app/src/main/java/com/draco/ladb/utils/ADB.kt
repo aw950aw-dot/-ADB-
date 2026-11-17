@@ -62,6 +62,7 @@ class ADB(private val context: Context) {
      * Single shell instance where we can pipe commands to
      */
     private var shellProcess: Process? = null
+    private val deathMonitorStarted = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /**
      * Returns the user buffer size if valid, else the default
@@ -97,7 +98,7 @@ class ADB(private val context: Context) {
      * Start the ADB server
      */
     @Synchronized
-    fun initServer(): Boolean {
+    fun initServer(skipWirelessReset: Boolean = false): Boolean {
         if (_running.value == true) return true
         if (tryingToPair) return false
 
@@ -112,9 +113,9 @@ class ADB(private val context: Context) {
             /* Only do wireless debugging steps on compatible versions */
             if (secureSettingsGranted) {
                 disableMobileDataAlwaysOn()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !skipWirelessReset) {
                     cycleWirelessDebugging()
-                } else if (!isUSBDebuggingEnabled()) {
+                } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && !isUSBDebuggingEnabled()) {
                     debug("Turning on USB debugging...")
                     Settings.Global.putInt(
                         context.contentResolver,
@@ -275,6 +276,7 @@ class ADB(private val context: Context) {
             sendToShellProcess(startupCommand)
 
         _running.postValue(true)
+        ensureShellDeathMonitor()
         return true
         } catch (interrupted: InterruptedException) {
             Thread.currentThread().interrupt()
@@ -370,6 +372,18 @@ class ADB(private val context: Context) {
                 Thread.sleep(3_000)
             }
         }
+    }
+
+    /** Starts exactly one monitor for the long-lived interactive ADB shell. */
+    fun ensureShellDeathMonitor() {
+        if (!deathMonitorStarted.compareAndSet(false, true)) return
+        Thread {
+            try {
+                waitForDeathAndReset()
+            } finally {
+                deathMonitorStarted.set(false)
+            }
+        }.apply { isDaemon = true; name = "ADBConnectionMonitor"; start() }
     }
 
     /**

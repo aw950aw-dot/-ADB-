@@ -124,7 +124,7 @@ class DnsDiscover private constructor(
         try {
             nsdManager.resolveService(service, object : NsdManager.ResolveListener {
                 override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                    Log.w(TAG, "Resolve failed ($errorCode) for \${serviceInfo.serviceName}")
+                    Log.w(TAG, "Resolve failed ($errorCode) for " + serviceInfo.serviceName)
                     if (errorCode == NsdManager.FAILURE_ALREADY_ACTIVE && retry < 2) {
                         mainHandler.postDelayed({ resolveService(service, retry + 1) }, 300L * (retry + 1))
                     } else {
@@ -138,7 +138,8 @@ class DnsDiscover private constructor(
                         if (port !in 1..65535) return
                         val host = serviceInfo.host?.hostAddress?.substringBefore('%')
                         val localAddresses = getLocalIpAddresses()
-                        if (host != null && localAddresses.isNotEmpty() && host !in localAddresses) {
+                        if (host != null && host != "127.0.0.1" && host != "::1" &&
+                            localAddresses.isNotEmpty() && host !in localAddresses) {
                             Log.d(TAG, "Ignoring ADB service not hosted by this device: $host")
                             return
                         }

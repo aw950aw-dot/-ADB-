@@ -94,6 +94,22 @@ class ConnectionActivity : AppCompatActivity() {
         handlePairingReply(intent)
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (!::status.isInitialized) return
+        if (vm.adb.running.value == true) {
+            status.text = "●  מחובר ומוכן לפקודות"
+            status.setTextColor(Color.rgb(25, 155, 105))
+            pairButton.text = "מחובר"
+            pairButton.isEnabled = false
+            pairPanel.visibility = View.GONE
+        } else if (!vm.needsToPair() && !pairing) {
+            startConnection()
+        } else if (!pairing) {
+            PairingNotification.show(this)
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)

@@ -3,6 +3,8 @@
     <uses-feature android:name="android.software.leanback" android:required="false"/>
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions"/>
@@ -13,6 +15,10 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <application android:banner="@drawable/banner" android:icon="@mipmap/ic_launcher" android:label="@string/app_name" android:roundIcon="@mipmap/ic_launcher_round" android:supportsRtl="true" android:theme="@style/Theme.LADB">
         <receiver android:name=".utils.PairingReplyReceiver" android:exported="false"/>
+        <service
+            android:name=".services.PairingService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice"/>
         <activity android:name=".views.AppDataBackupActivity" android:exported="false" android:label="גיבוי נתוני ADB SMART"/>
         <activity android:name=".views.ConnectionActivity" android:exported="false" android:launchMode="singleTop" android:label="חיבור Wireless Debugging"/>
         <activity android:name=".views.AppBackupPickerActivity" android:exported="false" android:label="בחר אפליקציה לגיבוי"/>

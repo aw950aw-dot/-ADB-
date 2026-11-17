@@ -21,6 +21,7 @@ object PairingNotification {
     const val ACTION_PAIR = "com.aw950aw.adbsmart.ACTION_PAIR_FROM_NOTIFICATION"
     private const val CHANNEL_ID = "wireless_debugging_pairing_v2"
     private const val NOTIFICATION_ID = 4106
+    const val WORKING_NOTIFICATION_ID = 4107
 
     private fun allowed(context: Context): Boolean =
         Build.VERSION.SDK_INT < 33 ||
@@ -94,6 +95,23 @@ object PairingNotification {
         }
     }
 
+    fun workingNotification(context: Context): android.app.Notification {
+        ensureChannel(context)
+        return NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_baseline_adb_24)
+            .setContentTitle("משייך את המכשיר")
+            .setContentText("מאתר את פורט השיוך ומתחבר ל־ADB…")
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .build()
+    }
+
+    fun cancelWorking(context: Context) {
+        runCatching { NotificationManagerCompat.from(context).cancel(WORKING_NOTIFICATION_ID) }
+    }
+
     fun showResult(context: Context, success: Boolean, message: String) {
         if (!allowed(context)) return
         try {
@@ -105,7 +123,8 @@ object PairingNotification {
                 .setContentIntent(openAppIntent(context))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_STATUS)
-                .setAutoCancel(false)
+                .setAutoCancel(true)
+                .setOngoing(false)
                 .setOnlyAlertOnce(false)
                 .build()
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)

@@ -68,7 +68,7 @@ object AppDataBackupManager {
 
     fun restoreBackup(context: Context, source: InputStream, password: String) {
         require(password.length >= 8) { "יש להזין את סיסמת הגיבוי." }
-        val staging = File(context.cacheDir, "adb-smart-stage-\${UUID.randomUUID()}").apply { mkdirs() }
+        val staging = File(context.cacheDir, "adb-smart-stage-" + UUID.randomUUID()).apply { mkdirs() }
         try {
             DataInputStream(BufferedInputStream(source)).use { input ->
                 val magic = ByteArray(MAGIC.size)
@@ -153,7 +153,7 @@ object AppDataBackupManager {
             throw IllegalArgumentException(
                 if (error.message?.contains("Tag mismatch", true) == true || error is java.io.IOException)
                     "הסיסמה שגויה או שקובץ הגיבוי פגום."
-                else "לא ניתן לשחזר את הגיבוי: \${error.message ?: "שגיאה לא ידועה"}",
+                else "לא ניתן לשחזר את הגיבוי: " + (error.message ?: "שגיאה לא ידועה"),
                 error
             )
         } finally {
@@ -213,8 +213,8 @@ object AppDataBackupManager {
             pairs.filter { it.first.isDirectory }.forEachIndexed { index, (source, destination) ->
                 val parent = destination.parentFile ?: error("נתיב שחזור לא תקין.")
                 if (!parent.exists() && !parent.mkdirs()) error("לא ניתן להכין תיקיית שחזור.")
-                val stagingDir = File(parent, ".\${destination.name}.restore-$token-$index")
-                val previous = File(parent, ".\${destination.name}.previous-$token-$index")
+                val stagingDir = File(parent, "." + destination.name + ".restore-" + token + "-" + index)
+                val previous = File(parent, "." + destination.name + ".previous-" + token + "-" + index)
                 stagingDir.deleteRecursively()
                 source.copyRecursively(stagingDir, overwrite = true)
                 prepared += RestoreDirectory(destination, stagingDir, previous)
@@ -222,11 +222,11 @@ object AppDataBackupManager {
 
             prepared.forEach { item ->
                 if (item.destination.exists() && !item.destination.renameTo(item.previous)) {
-                    error("לא ניתן לשמור עותק זמני של \${item.destination.name}.")
+                    error("לא ניתן לשמור עותק זמני של " + item.destination.name + ".")
                 }
                 if (!item.staging.renameTo(item.destination)) {
                     if (item.previous.exists() && !item.previous.renameTo(item.destination)) rollbackFailed = true
-                    error("לא ניתן להחליף את \${item.destination.name}.")
+                    error("לא ניתן להחליף את " + item.destination.name + ".")
                 }
                 committed += item
             }
