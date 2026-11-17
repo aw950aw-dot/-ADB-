@@ -14,6 +14,7 @@ import com.draco.ladb.utils.ApiKeyVault
 import com.draco.ladb.utils.AiProviderClient
 import com.draco.ladb.utils.RootAccessManager
 import com.draco.ladb.utils.UiTheme
+import com.draco.ladb.utils.UiComponents
 
 class SettingsActivity : AppCompatActivity() {
     private val palette get() = UiTheme.palette(this)
@@ -22,15 +23,7 @@ class SettingsActivity : AppCompatActivity() {
     private val providerNames = listOf("Google Gemini", "OpenAI", "Anthropic Claude", "ספק תואם OpenAI")
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    private fun card(): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(dp(16), dp(14), dp(16), dp(14))
-        background = GradientDrawable().apply {
-            setColor(palette.surface)
-            cornerRadius = dp(16).toFloat()
-            setStroke(dp(1), palette.outline)
-        }
-    }
+    private fun card(): LinearLayout = UiComponents.panel(this, palette, 16, 16)
 
     private fun heading(text: String): TextView = TextView(this).apply {
         this.text = text
@@ -364,9 +357,11 @@ class SettingsActivity : AppCompatActivity() {
             })
         })
 
-        setContentView(ScrollView(this).apply {
+        val pageScroll = ScrollView(this).apply {
             isFillViewport = true
             addView(root)
-        })
+        }
+        setContentView(pageScroll)
+        UiComponents.applySystemBars(this, pageScroll, palette)
     }
 }

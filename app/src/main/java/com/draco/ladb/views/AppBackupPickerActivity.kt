@@ -22,6 +22,7 @@ import androidx.lifecycle.lifecycleScope
 import com.draco.ladb.backup.AppBackupManager
 import com.draco.ladb.utils.ADB
 import com.draco.ladb.utils.UiTheme
+import com.draco.ladb.utils.UiComponents
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -143,6 +144,7 @@ class AppBackupPickerActivity : AppCompatActivity() {
 
         root.addView(scroll, LinearLayout.LayoutParams(-1, -1))
         setContentView(root)
+        UiComponents.applySystemBars(this, root, palette)
     }
 
     private fun reloadApps() {
@@ -195,7 +197,7 @@ class AppBackupPickerActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12), dp(11), dp(12), dp(11))
-            background = rounded(palette.surface, dp(16), palette.outline)
+            background = UiComponents.surface(this@AppBackupPickerActivity, palette.surface, 16, palette.outline, clickable = true)
             isClickable = true
             isFocusable = true
             setOnClickListener { prepareBackup(app) }
@@ -292,18 +294,8 @@ class AppBackupPickerActivity : AppCompatActivity() {
     }
 
     private fun actionButton(label: String, color: Int, textColor: Int = Color.WHITE, action: () -> Unit): TextView =
-        TextView(this).apply {
-            text = label
-            textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setTextColor(textColor)
-            setPadding(dp(9), dp(7), dp(9), dp(7))
-            background = rounded(color, dp(12))
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { action() }
-        }
+        UiComponents.button(this, label, color, textColor,
+            if (color == palette.surfaceAlt) palette.outline else null, 48, 2, action)
 
     private fun text(value: String, size: Int, color: Int, bold: Boolean): TextView =
         TextView(this).apply {

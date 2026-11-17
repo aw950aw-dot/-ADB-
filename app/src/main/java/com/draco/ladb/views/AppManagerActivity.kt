@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.draco.ladb.utils.ADB
 import com.draco.ladb.utils.UiTheme
+import com.draco.ladb.utils.UiComponents
 import java.util.Locale
 
 class AppManagerActivity : AppCompatActivity() {
@@ -137,6 +138,7 @@ class AppManagerActivity : AppCompatActivity() {
         }
         root.addView(close, LinearLayout.LayoutParams(-1, dp(50)))
         setContentView(root)
+        UiComponents.applySystemBars(this, root, palette)
     }
 
     override fun onResume() {
@@ -292,6 +294,7 @@ class AppManagerActivity : AppCompatActivity() {
                 layoutDirection = View.LAYOUT_DIRECTION_RTL
                 setPadding(dp(8), dp(10), dp(8), dp(10))
                 minimumHeight = dp(76)
+                background = UiComponents.surface(this@AppManagerActivity, palette.surface, 12, palette.outline, clickable = true)
             }
             row.removeAllViews()
             val icon = ImageView(this@AppManagerActivity).apply {

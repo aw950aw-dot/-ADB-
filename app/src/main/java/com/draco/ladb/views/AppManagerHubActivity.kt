@@ -12,6 +12,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.draco.ladb.utils.UiTheme
+import com.draco.ladb.utils.UiComponents
 
 /** User chooses the intended app-management action before the app list is opened. */
 class AppManagerHubActivity : AppCompatActivity() {
@@ -49,7 +50,7 @@ class AppManagerHubActivity : AppCompatActivity() {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(16), dp(16), dp(16), dp(16))
-                background = rounded(palette.surface, dp(17), palette.outline)
+                background = UiComponents.surface(this@AppManagerHubActivity, palette.surface, 17, palette.outline)
             }
             card.addView(text("0${index + 1}", 11, palette.accent, true))
             card.addView(text(option.first, 18, palette.text, true).apply {
@@ -63,8 +64,7 @@ class AppManagerHubActivity : AppCompatActivity() {
         }
         page.addView(scroll, LinearLayout.LayoutParams(-1, -1))
         setContentView(page)
-        window.statusBarColor = palette.statusBar
-        window.navigationBarColor = palette.navigationBar
+        UiComponents.applySystemBars(this, page, palette)
     }
 
     private fun text(value: String, size: Int, color: Int, bold: Boolean) =
@@ -76,18 +76,9 @@ class AppManagerHubActivity : AppCompatActivity() {
             if (bold) typeface = Typeface.DEFAULT_BOLD
         }
 
-    private fun button(value: String, bg: Int, fg: Int, action: () -> Unit) =
-        TextView(this).apply {
-            text = value
-            textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setTextColor(fg)
-            background = rounded(bg, dp(12))
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { action() }
-        }
+    private fun button(value: String, bg: Int, fg: Int, action: () -> Unit): TextView =
+        UiComponents.button(this, value, bg, fg,
+            if (bg == palette.surfaceAlt) palette.outline else null, 48, 2, action)
 
     private fun rounded(color: Int, radius: Int, stroke: Int? = null) =
         GradientDrawable().apply {

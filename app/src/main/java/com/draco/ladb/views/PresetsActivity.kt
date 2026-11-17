@@ -14,6 +14,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.edit
 import com.draco.ladb.utils.UiTheme
+import com.draco.ladb.utils.UiComponents
 import java.util.Locale
 
 class PresetsActivity : AppCompatActivity() {
@@ -74,20 +75,13 @@ class PresetsActivity : AppCompatActivity() {
     )
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-    private fun card(): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(dp(14), dp(11), dp(14), dp(11))
-        background = GradientDrawable().apply {
-            setColor(palette.surface)
-            cornerRadius = dp(14).toFloat()
-            setStroke(dp(1), palette.outline)
-        }
+    private fun card(): LinearLayout = UiComponents.panel(this, palette, 14, 14).apply {
         isClickable = true
         isFocusable = true
+        background = UiComponents.surface(this@PresetsActivity, palette.surface, 14, palette.outline, clickable = true)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        UiTheme.applySavedMode(this)
         UiTheme.applySavedMode(this)
         super.onCreate(savedInstanceState)
         window.statusBarColor = palette.statusBar
@@ -142,6 +136,7 @@ class PresetsActivity : AppCompatActivity() {
             setOnClickListener { finish() }
         })
         setContentView(root)
+        UiComponents.applySystemBars(this, root, palette)
         render()
     }
 
