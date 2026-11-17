@@ -18,6 +18,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.activity.result.contract.ActivityResultContracts
 import com.draco.ladb.utils.ADB
 import com.draco.ladb.utils.UiTheme
+import com.draco.ladb.utils.UiComponents
 
 /** Redesigned landing screen. Existing LADB tools remain available as separate destinations. */
 class DashboardActivity : AppCompatActivity() {
@@ -150,6 +151,7 @@ class DashboardActivity : AppCompatActivity() {
         })
         page.addView(scroll, LinearLayout.LayoutParams(-1, -1))
         setContentView(page)
+        UiComponents.applySystemBars(this, page, palette)
     }
 
     private data class Tool(
@@ -164,7 +166,7 @@ class DashboardActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(13), dp(13), dp(13), dp(13))
-            background = rounded(palette.surface, dp(17), palette.outline)
+            background = UiComponents.surface(this@DashboardActivity, palette.surface, 17, palette.outline, clickable = true)
             isClickable = true
             isFocusable = true
             setOnClickListener { tool.action() }
@@ -187,16 +189,10 @@ class DashboardActivity : AppCompatActivity() {
         }
     }
 
-    private fun settingsGearButton(): TextView = TextView(this).apply {
-        text = "⚙"
-        textSize = 23f
-        gravity = Gravity.CENTER
-        setTextColor(palette.accent)
-        background = rounded(palette.surface, dp(15), palette.outline)
-        isClickable = true
-        isFocusable = true
-        setOnClickListener { startActivity(Intent(this@DashboardActivity, SettingsActivity::class.java)) }
-    }
+    private fun settingsGearButton(): TextView =
+        UiComponents.button(this, "⚙", palette.surface, palette.accent, palette.outline, 48, 1) {
+            startActivity(Intent(this@DashboardActivity, SettingsActivity::class.java))
+        }
 
     private fun requestNotificationsThenShowGuide() {
         val prefs = getSharedPreferences("first_run", MODE_PRIVATE)
@@ -248,18 +244,7 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun actionButton(label: String, color: Int, action: () -> Unit): TextView =
-        TextView(this).apply {
-            text = label
-            textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-            background = rounded(color, dp(14))
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { action() }
-        }
+        UiComponents.button(this, label, color, Color.WHITE, null, 50, 2, action)
 
     private fun text(value: String, size: Int, color: Int, bold: Boolean): TextView =
         TextView(this).apply {

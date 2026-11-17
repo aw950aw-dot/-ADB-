@@ -21,6 +21,7 @@ import com.draco.ladb.R
 import com.draco.ladb.utils.ApiKeyVault
 import com.draco.ladb.utils.AiProviderClient
 import com.draco.ladb.utils.UiTheme
+import com.draco.ladb.utils.UiComponents
 import com.draco.ladb.viewmodels.MainActivityViewModel
 import androidx.activity.viewModels
 import androidx.activity.result.contract.ActivityResultContracts
@@ -49,9 +50,10 @@ class MainActivity : AppCompatActivity() {
         if (!uris.isNullOrEmpty()) installSelectedApks(uris)
     }
     private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
-    private fun panel(): LinearLayout=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(14),dp(16),dp(14)); background=GradientDrawable().apply { setColor(palette.surface); cornerRadius=dp(18).toFloat(); setStroke(dp(1),palette.outline) } }
+    private fun panel(): LinearLayout = UiComponents.panel(this, palette, 16, 18)
     private fun label(s:String,size:Float=15f):TextView=TextView(this).apply { text=s; textSize=size; setTextColor(palette.text); gravity=Gravity.RIGHT }
-    private fun button(s:String, action:()->Unit)=Button(this).apply { text=s; isAllCaps=false; setOnClickListener { action() } }
+    private fun button(s: String, action: () -> Unit): TextView =
+        UiComponents.button(this, s, palette.accent, Color.WHITE, null, 48, 2, action)
     private fun addSpace(h:Int=10){ root.addView(Space(this).apply { minimumHeight=dp(h) }) }
     override fun onCreate(savedInstanceState:Bundle?){ UiTheme.applySavedMode(this); super.onCreate(savedInstanceState)
         window.statusBarColor=palette.statusBar; window.navigationBarColor=palette.navigationBar; window.decorView.systemUiVisibility=if(palette.dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
@@ -180,7 +182,9 @@ class MainActivity : AppCompatActivity() {
                     LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(3), 0, dp(3), 0) })
             })
         })
-        setContentView(ScrollView(this).apply { isFillViewport=true; addView(root) })
+        val pageScroll = ScrollView(this).apply { isFillViewport = true; addView(root) }
+        setContentView(pageScroll)
+        UiComponents.applySystemBars(this, pageScroll, palette)
         vm.outputText.observe(this){ value ->
             val wasAtBottom = outputScroll.childCount == 0 ||
                 outputScroll.scrollY + outputScroll.height >= outputScroll.getChildAt(0).height - dp(48)
@@ -213,59 +217,16 @@ class MainActivity : AppCompatActivity() {
             vm.startADBServer()
         }
     }
-    private fun settingsGearButton(): TextView = TextView(this).apply {
-        text = "⚙"
-        textSize = 23f
-        gravity = Gravity.CENTER
-        setTextColor(blue)
-        background = GradientDrawable().apply {
-            setColor(palette.surfaceAlt)
-            cornerRadius = dp(15).toFloat()
-            setStroke(dp(1), palette.outline)
+    private fun settingsGearButton(): TextView =
+        UiComponents.button(this, "⚙", palette.surfaceAlt, blue, palette.outline, 48, 1) {
+            startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
         }
-        isClickable = true
-        isFocusable = true
-        setOnClickListener { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) }
-    }
 
-    private fun footerAction(title: String, action: () -> Unit): TextView = TextView(this).apply {
-        text = title
-        textSize = 12f
-        typeface = Typeface.DEFAULT_BOLD
-        gravity = Gravity.CENTER
-        includeFontPadding = false
-        maxLines = 1
-        setTextColor(palette.text)
-        setPadding(dp(2), dp(4), dp(2), dp(4))
-        background = GradientDrawable().apply {
-            setColor(palette.surfaceAlt)
-            cornerRadius = dp(12).toFloat()
-            setStroke(dp(1), palette.outline)
-        }
-        isClickable = true
-        isFocusable = true
-        setOnClickListener { action() }
-    }
+    private fun footerAction(title: String, action: () -> Unit): TextView =
+        UiComponents.button(this, title, palette.surfaceAlt, palette.text, palette.outline, 48, 1, action)
 
-    private fun tile(title:String, color:Int, action:()->Unit):TextView = TextView(this).apply {
-        text=title
-        textSize=14f
-        maxLines=2
-        ellipsize = android.text.TextUtils.TruncateAt.END
-        includeFontPadding=false
-        typeface=Typeface.DEFAULT_BOLD
-        gravity=Gravity.CENTER
-        setTextColor(Color.WHITE)
-        setPadding(dp(6),dp(6),dp(6),dp(6))
-        background=GradientDrawable().apply {
-            setColor(color)
-            cornerRadius=dp(16).toFloat()
-        }
-        elevation=dp(2).toFloat()
-        isClickable=true
-        isFocusable=true
-        setOnClickListener { action() }
-    }
+    private fun tile(title: String, color: Int, action: () -> Unit): TextView =
+        UiComponents.button(this, title, color, Color.WHITE, null, 80, 2, action)
 
     private fun installSelectedApks(uris:List<android.net.Uri>) {
         if(vm.adb.running.value!=true) {

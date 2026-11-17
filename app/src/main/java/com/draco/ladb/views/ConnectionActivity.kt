@@ -28,6 +28,7 @@ import com.draco.ladb.viewmodels.MainActivityViewModel
 import com.draco.ladb.utils.PairingNotification
 import com.draco.ladb.utils.PairingPortDiscovery
 import com.draco.ladb.utils.UiTheme
+import com.draco.ladb.utils.UiComponents
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -213,6 +214,7 @@ class ConnectionActivity : AppCompatActivity() {
 
         page.addView(scroll, LinearLayout.LayoutParams(-1, -1))
         setContentView(page)
+        UiComponents.applySystemBars(this, page, palette)
     }
 
 
@@ -356,18 +358,8 @@ class ConnectionActivity : AppCompatActivity() {
         }
 
     private fun actionButton(label: String, bg: Int, fg: Int, action: () -> Unit): TextView =
-        TextView(this).apply {
-            text = label
-            textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setTextColor(fg)
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-            background = rounded(bg, dp(13), if (bg == palette.surfaceAlt) palette.outline else null)
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { action() }
-        }
+        UiComponents.button(this, label, bg, fg,
+            if (bg == palette.surfaceAlt) palette.outline else null, 48, 2, action)
 
     private fun rounded(color: Int, radius: Int, stroke: Int? = null): GradientDrawable =
         GradientDrawable().apply {

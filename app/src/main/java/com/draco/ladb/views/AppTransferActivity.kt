@@ -20,6 +20,7 @@ import androidx.lifecycle.lifecycleScope
 import com.draco.ladb.backup.AppBackupManager
 import com.draco.ladb.utils.ADB
 import com.draco.ladb.utils.UiTheme
+import com.draco.ladb.utils.UiComponents
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -130,6 +131,7 @@ class AppTransferActivity : AppCompatActivity() {
 
         page.addView(scroll, LinearLayout.LayoutParams(-1, -1))
         setContentView(page)
+        UiComponents.applySystemBars(this, page, palette)
     }
 
     private fun actionCard(
@@ -143,7 +145,7 @@ class AppTransferActivity : AppCompatActivity() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(17), dp(17), dp(17), dp(16))
-            background = rounded(palette.surface, dp(19), palette.outline)
+            background = UiComponents.surface(this@AppTransferActivity, palette.surface, 19, palette.outline)
         }
         card.addView(text(number, 11, accent, true))
         card.addView(text(title, 21, palette.text, true).apply {
@@ -212,18 +214,7 @@ class AppTransferActivity : AppCompatActivity() {
     }
 
     private fun actionButton(label: String, color: Int, action: () -> Unit): TextView =
-        TextView(this).apply {
-            text = label
-            textSize = 14f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-            background = rounded(color, dp(13))
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { action() }
-        }
+        UiComponents.button(this, label, color, Color.WHITE, null, 48, 2, action)
 
     private fun text(value: String, size: Int, color: Int, bold: Boolean): TextView =
         TextView(this).apply {
