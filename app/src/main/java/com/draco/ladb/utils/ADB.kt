@@ -683,17 +683,8 @@ class ADB(private val context: Context) {
         require(command.isNotBlank() && command.length <= 12_000) { "Invalid shell command" }
         if (_running.value != true) throw IllegalStateException("אין חיבור ADB פעיל")
         val process = processForAdb(listOf("shell", "sh", "-c", command), mergeError = true)
-        val output = java.io.ByteArrayOutputStream()
-        val reader = Thread {
-            runCatching { process.inputStream.use { it.copyTo(output) } }
-        }.apply { isDaemon = true; start() }
-        if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-            process.destroyForcibly()
-            reader.join(2_000)
-            throw IllegalStateException("פקודת ADB חרגה מזמן ההמתנה")
-        }
-        reader.join(5_000)
-        return CommandResult(process.exitValue(), output.toString("UTF-8").trim())
+        val (exitCode, output) = captureProcessOutput(process, timeoutSeconds, "פקודת ADB חרגה מזמן ההמתנה")
+        return CommandResult(exitCode, output.trim())
     }
 
     /** Streams binary stdout from adb exec-out to a local file without converting it to text. */
@@ -753,18 +744,32 @@ class ADB(private val context: Context) {
         val errorText = StringBuilder()
         val reader = Thread {
             runCatching { process.errorStream.bufferedReader().use { errorText.append(it.readText()) } }
-        }.apply { isDaemon = true; start() }
-
-        source.inputStream().use { input ->
-            process.outputStream.use { output -> input.copyTo(output, 64 * 1024) }
-        }
+        }.apply { isDaemon = true; name = "ADBExecInErrors"; start() }
+        val copyFailure = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
+        val writer = Thread {
+            try {
+                source.inputStream().use { input ->
+                    process.outputStream.use { output -> input.copyTo(output, 64 * 1024) }
+                }
+            } catch (error: Throwable) {
+                copyFailure.set(error)
+                runCatching { process.outputStream.close() }
+            }
+        }.apply { isDaemon = true; name = "ADBExecInWriter"; start() }
 
         if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
             process.destroyForcibly()
+            writer.join(2_000)
             reader.join(2_000)
             throw IllegalStateException("שחזור קובץ דרך ADB חרג מזמן ההמתנה")
         }
+        writer.join(5_000)
         reader.join(5_000)
+        if (writer.isAlive) {
+            process.destroyForcibly()
+            throw IllegalStateException("העברת קובץ השחזור לא הסתיימה בזמן.")
+        }
+        copyFailure.get()?.let { throw IllegalStateException("לא ניתן להעביר את קובץ הגיבוי: ${it.message}", it) }
         if (process.exitValue() != 0) {
             throw IllegalStateException(errorText.toString().ifBlank { "העברת הנתונים למכשיר נכשלה" })
         }
