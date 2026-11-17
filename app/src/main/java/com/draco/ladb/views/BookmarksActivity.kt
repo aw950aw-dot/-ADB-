@@ -13,6 +13,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updateLayoutParams
 import com.draco.ladb.R
+import com.draco.ladb.utils.UiTheme
 import com.draco.ladb.databinding.ActivityBookmarksBinding
 import com.draco.ladb.viewmodels.BookmarksActivityViewModel
 
@@ -22,6 +23,7 @@ class BookmarksActivity : AppCompatActivity() {
     private lateinit var initialText: String
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        UiTheme.applySavedMode(this)
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         binding = ActivityBookmarksBinding.inflate(layoutInflater)

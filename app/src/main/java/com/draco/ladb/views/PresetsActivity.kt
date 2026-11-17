@@ -1,6 +1,6 @@
 package com.draco.ladb.views
 
-import android.app.Activity
+import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.graphics.Color
 import android.graphics.Typeface
@@ -13,11 +13,13 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.edit
+import com.draco.ladb.utils.UiTheme
 import java.util.Locale
 
-class PresetsActivity : Activity() {
+class PresetsActivity : AppCompatActivity() {
+    private val palette get() = UiTheme.palette(this)
     private data class Preset(val category: String, val title: String, val command: String)
-    private val blue = palette.accent
+    private val blue get() = palette.accent
     private lateinit var listContainer: LinearLayout
     private lateinit var search: EditText
     private val presets = listOf(
@@ -85,6 +87,7 @@ class PresetsActivity : Activity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        UiTheme.applySavedMode(this)
         UiTheme.applySavedMode(this)
         super.onCreate(savedInstanceState)
         window.statusBarColor = palette.statusBar
