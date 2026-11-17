@@ -91,7 +91,7 @@ jobs:
           echo "$VERIFY_OUTPUT" | grep -q "Verified using v2 scheme (APK Signature Scheme v2): true"
           BADGING=$("$AAPT" dump badging "$APK")
           printf '%s\\n' "$BADGING" | head -n 10
-          echo "$BADGING" | grep -q "package: name='com.aw950aw.adbsmart' versionCode='15' versionName='1.9.5'"
+          echo "$BADGING" | grep -q "package: name='com.aw950aw.adbsmart' versionCode='16' versionName='1.9.6'"
           echo "$BADGING" | grep -q "sdkVersion:'26'"
           echo "$BADGING" | grep -q "targetSdkVersion:'33'"
           sha256sum "$APK"
