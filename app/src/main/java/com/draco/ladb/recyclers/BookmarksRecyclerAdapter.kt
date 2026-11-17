@@ -12,7 +12,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.draco.ladb.R
 
 class BookmarksRecyclerAdapter(context: Context) : RecyclerView.Adapter<BookmarksRecyclerAdapter.ViewHolder>() {
-    private val list = sortedSetOf<String>()
+    private val list = mutableListOf<String>()
     private val prefs = PreferenceManager.getDefaultSharedPreferences(context)
 
     var pickHook: (String) -> Unit = {}
@@ -28,49 +28,54 @@ class BookmarksRecyclerAdapter(context: Context) : RecyclerView.Adapter<Bookmark
     @SuppressLint("NotifyDataSetChanged")
     fun updateList(refresh: Boolean = true) {
         list.clear()
-        list.addAll(prefs.getStringSet("bookmarks", setOf()) ?: emptySet())
-        if (refresh)
-            notifyDataSetChanged()
+        list.addAll((prefs.getStringSet("bookmarks", emptySet()) ?: emptySet()).sorted())
+        if (refresh) notifyDataSetChanged()
     }
 
     private fun saveList() {
         with(prefs.edit()) {
-            putStringSet("bookmarks", list)
+            putStringSet("bookmarks", list.toSet())
             apply()
         }
     }
 
-    @SuppressLint("NotifyDataSetChanged")
     fun add(text: String) {
-        list.add(text)
-        notifyDataSetChanged()
+        if (text.isBlank() || text in list) return
+        val index = list.binarySearch(text).let { if (it < 0) -it - 1 else it }
+        list.add(index, text)
+        notifyItemInserted(index)
         saveList()
     }
 
-    @SuppressLint("NotifyDataSetChanged")
     fun delete(text: String) {
-        list.remove(text)
-        notifyDataSetChanged()
+        val index = list.indexOf(text)
+        if (index < 0) return
+        list.removeAt(index)
+        notifyItemRemoved(index)
         saveList()
     }
 
     @SuppressLint("NotifyDataSetChanged")
     fun edit(text: String, newText: String) {
-        list.remove(text)
-        list.add(newText)
+        if (newText.isBlank()) return
+        val oldIndex = list.indexOf(text)
+        if (oldIndex < 0) return
+        if (newText != text && newText in list) return
+        list.removeAt(oldIndex)
+        val newIndex = list.binarySearch(newText).let { if (it < 0) -it - 1 else it }
+        list.add(newIndex, newText)
         notifyDataSetChanged()
         saveList()
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        updateList(false)
         val view = LayoutInflater.from(parent.context)
             .inflate(R.layout.recycler_item, parent, false)
         return ViewHolder(view)
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val text = list.elementAt(position)
+        val text = list[position]
         holder.content.text = text
         holder.itemView.setOnClickListener { pickHook(text) }
         holder.delete.setOnClickListener { deleteHook(text) }
