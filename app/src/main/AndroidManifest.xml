@@ -3,6 +3,8 @@
     <queries>
         <intent>
             <action android:name="android.settings.WIRELESS_DEBUGGING_PAIRING_DIALOG"/>
+        </intent>
+        <intent>
             <action android:name="android.settings.WIRELESS_DEBUGGING_SETTINGS"/>
         </intent>
     </queries>
