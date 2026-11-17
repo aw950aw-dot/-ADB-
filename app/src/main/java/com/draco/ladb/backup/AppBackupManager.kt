@@ -299,7 +299,7 @@ object AppBackupManager {
                 }
             }
 
-            val userId = currentUserId(adb)
+            currentUserId(adb)
             val appUid = installed.applicationInfo?.uid
                 ?: error("לא ניתן לזהות UID של האפליקציה במכשיר היעד.")
             val rootAvailable = runCatching { RootAccessManager.verifyAccess(context) }.getOrDefault(false)
