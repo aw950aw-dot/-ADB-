@@ -105,12 +105,15 @@ jobs:
             --ks-pass "pass:$STORE_PASS" \
             --ks-key-alias "$KEY_ALIAS" \
             --key-pass "pass:$KEY_PASS" \
+            --min-sdk-version 1 \
             --v1-signing-enabled true \
             --v2-signing-enabled true \
             "$APK"
+          V1_VERIFY_OUTPUT=$("$APKSIGNER" verify --verbose --min-sdk-version 1 "$APK")
+          printf '%s\n' "$V1_VERIFY_OUTPUT"
+          echo "$V1_VERIFY_OUTPUT" | grep -q "Verified using v1 scheme (JAR signing): true"
           VERIFY_OUTPUT=$("$APKSIGNER" verify --verbose --print-certs "$APK")
           printf '%s\n' "$VERIFY_OUTPUT"
-          echo "$VERIFY_OUTPUT" | grep -q "Verified using v1 scheme (JAR signing): true"
           echo "$VERIFY_OUTPUT" | grep -q "Verified using v2 scheme (APK Signature Scheme v2): true"
           BADGING=$("$AAPT" dump badging "$APK")
           printf '%s\n' "$BADGING" | head -n 8
