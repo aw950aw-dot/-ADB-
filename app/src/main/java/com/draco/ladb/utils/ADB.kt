@@ -467,7 +467,7 @@ class ADB(private val context: Context) {
     /**
      * Ask the device to pair on Android 11+ devices
      */
-    fun pair(port: String, pairingCode: String): Boolean {
+    fun pair(port: String, pairingCode: String, host: String = "localhost"): Boolean {
         val numericPort = port.toIntOrNull()
         if (numericPort == null || numericPort !in 1..65535 || !pairingCode.matches(Regex("\\d{6}"))) return false
 
@@ -476,7 +476,9 @@ class ADB(private val context: Context) {
         try {
             // Drain ADB output while it is running. Waiting before reading can fill the pipe
             // and make the pairing process appear to hang.
-            val activeProcess = ProcessBuilder(adbPath, "pair", "localhost:$numericPort")
+            val cleanHost = host.trim().removePrefix("[").removeSuffix("]").ifBlank { "localhost" }
+            val endpoint = if (cleanHost.contains(":")) "[$cleanHost]:$numericPort" else "$cleanHost:$numericPort"
+            val activeProcess = ProcessBuilder(adbPath, "pair", endpoint)
                 .directory(context.filesDir)
                 .redirectErrorStream(true)
                 .apply {
@@ -498,8 +500,8 @@ class ADB(private val context: Context) {
                 }
             }.apply { isDaemon = true; name = "ADBPairOutput"; start() }
 
-            // The bundled adb client prints its interactive prompt asynchronously.
-            Thread.sleep(4_000)
+            // Feed the code immediately. ADB reads stdin after its pairing prompt;
+            // the pipe buffers this line, so there is no artificial multi-second delay.
             activeProcess.outputStream.bufferedWriter().use { writer ->
                 writer.write(pairingCode)
                 writer.newLine()
