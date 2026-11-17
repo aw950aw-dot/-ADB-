@@ -50,6 +50,13 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew testReleaseUnitTest lintRelease --stacktrace
+      - name: Upload Android lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-lint-report
+          path: app/build/reports/lint-results-release.html
+          if-no-files-found: ignore
       - name: Build release APK
         env:
           ADB_SMART_STORE_PASSWORD: ${{ secrets.ADB_SMART_STORE_PASSWORD }}
