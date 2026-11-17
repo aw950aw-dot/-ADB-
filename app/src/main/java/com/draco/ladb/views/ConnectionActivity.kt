@@ -42,6 +42,7 @@ class ConnectionActivity : AppCompatActivity() {
     private lateinit var pairPanel: LinearLayout
     private lateinit var pairButton: TextView
     private var pairing = false
+    private var connectionRequested = false
     private var pendingSettingsLaunch = false
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -309,7 +310,8 @@ class ConnectionActivity : AppCompatActivity() {
     }
 
     private fun startConnection() {
-        if (vm.adb.running.value == true) return
+        if (vm.adb.running.value == true || connectionRequested) return
+        connectionRequested = true
         status.text = "מתחבר ל־ADB… השאר את Wireless Debugging פעיל."
         pairButton.isEnabled = false
         pairButton.text = "מתחבר…"
@@ -320,7 +322,9 @@ class ConnectionActivity : AppCompatActivity() {
                     status.text = "●  מחובר ומוכן לפקודות"
                     status.setTextColor(Color.rgb(25, 155, 105))
                     pairButton.text = "מחובר"
+                    pairButton.isEnabled = false
                 } else {
+                    connectionRequested = false
                     status.text = "החיבור לא הצליח. בדוק שניפוי באגים אלחוטי פעיל ונסה שוב."
                     pairButton.text = "נסה להתחבר שוב"
                     pairButton.isEnabled = true

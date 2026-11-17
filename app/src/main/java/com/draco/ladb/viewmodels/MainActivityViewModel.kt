@@ -82,9 +82,7 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
      * Start a death listener to restart the shell once it dies
      */
     private fun startShellDeathThread() {
-        viewModelScope.launch(Dispatchers.IO) {
-            adb.waitForDeathAndReset()
-        }
+        adb.ensureShellDeathMonitor()
     }
 
     /**

@@ -48,7 +48,7 @@ class PairingPortDiscovery(context: Context) {
                                         val belongsToThisDevice = runCatching {
                                             NetworkInterface.getNetworkInterfaces().asSequence().any { network ->
                                                 network.inetAddresses.asSequence().any { address ->
-                                                    address.hostAddress == serviceInfo.host.hostAddress
+                                                    address.hostAddress.substringBefore('%') == serviceInfo.host.hostAddress.substringBefore('%')
                                                 }
                                             }
                                         }.getOrDefault(false)

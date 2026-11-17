@@ -1,6 +1,7 @@
 package com.draco.ladb.views
 
 import android.app.AlertDialog
+import android.app.ProgressDialog
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -22,6 +23,10 @@ import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.draco.ladb.utils.ADB
 import com.draco.ladb.utils.UiTheme
 import java.util.Locale
@@ -47,6 +52,7 @@ class AppManagerActivity : AppCompatActivity() {
     private lateinit var searchInput: EditText
     private lateinit var sortSpinner: Spinner
     private val handler = Handler(Looper.getMainLooper())
+    private var actionInProgress = false
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -212,18 +218,46 @@ class AppManagerActivity : AppCompatActivity() {
     }
 
     private fun performAction(entry: AppEntry) {
+        if (actionInProgress) return
         if (adb.running.value != true) {
-            Toast.makeText(this, "אין חיבור ADB פעיל. התחבר ממסך הבית ונסה שוב.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "אין חיבור ADB פעיל. התחבר ונסה שוב.", Toast.LENGTH_LONG).show()
             return
         }
-        val command = when (mode) {
-            Mode.REMOVE -> "pm uninstall --user 0 ${entry.packageName}"
-            Mode.DISABLE -> "pm disable-user --user 0 ${entry.packageName}"
-            Mode.ENABLE -> "pm enable --user 0 ${entry.packageName}"
+        actionInProgress = true
+        val progress = ProgressDialog.show(this, "מבצע פעולה", "ממתין לתשובת Android…", true, false)
+        lifecycleScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val userResult = adb.executeShell("am get-current-user", 15)
+                    val userId = userResult.output.lineSequence()
+                        .mapNotNull { it.trim().toIntOrNull() }
+                        .lastOrNull() ?: 0
+                    val command = when (mode) {
+                        Mode.REMOVE -> "pm uninstall --user $userId ${entry.packageName}"
+                        Mode.DISABLE -> "pm disable-user --user $userId ${entry.packageName}"
+                        Mode.ENABLE -> "pm enable --user $userId ${entry.packageName}"
+                    }
+                    val result = adb.executeShell(command, 30)
+                    if (result.exitCode != 0) {
+                        throw IllegalStateException(result.output.ifBlank { "Android דחה את הפעולה." })
+                    }
+                    result.output.ifBlank { "הפעולה הסתיימה." }
+                }
+            }
+            actionInProgress = false
+            progress.dismiss()
+            if (outcome.isSuccess) {
+                Toast.makeText(this@AppManagerActivity, "הפעולה הושלמה.", Toast.LENGTH_SHORT).show()
+                loadApps()
+            } else {
+                AlertDialog.Builder(this@AppManagerActivity)
+                    .setTitle("הפעולה נכשלה")
+                    .setMessage(outcome.exceptionOrNull()?.message ?: "Android לא אישר את הפעולה.")
+                    .setPositiveButton("סגור", null)
+                    .show()
+                loadApps()
+            }
         }
-        adb.sendToShellProcess(command)
-        Toast.makeText(this, "הפקודה נשלחה ל־ADB. בדוק את הפלט במסך הראשי.", Toast.LENGTH_LONG).show()
-        handler.postDelayed({ loadApps() }, 1600)
     }
 
     private inner class AppAdapter : BaseAdapter() {
