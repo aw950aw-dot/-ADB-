@@ -1,6 +1,9 @@
 package com.draco.ladb.views
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -11,6 +14,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
+import androidx.activity.result.contract.ActivityResultContracts
 import com.draco.ladb.utils.ADB
 import com.draco.ladb.utils.UiTheme
 
@@ -19,6 +24,10 @@ class DashboardActivity : AppCompatActivity() {
     private val adb by lazy { ADB.getInstance(this) }
     private val palette get() = UiTheme.palette(this)
     private lateinit var connection: TextView
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            showFirstRunGuideIfNeeded()
+        }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
@@ -27,6 +36,7 @@ class DashboardActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         buildDashboard()
         adb.running.observe(this) { updateConnection(it == true) }
+        requestNotificationsThenShowGuide()
     }
 
     override fun onResume() {
@@ -51,6 +61,7 @@ class DashboardActivity : AppCompatActivity() {
 
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
+            layoutDirection = View.LAYOUT_DIRECTION_LTR
             gravity = Gravity.CENTER_VERTICAL
         }
         val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -59,9 +70,7 @@ class DashboardActivity : AppCompatActivity() {
             setPadding(0, dp(3), 0, 0)
         })
         top.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        top.addView(actionButton("⚙", palette.surfaceAlt) {
-            startActivity(Intent(this, SettingsActivity::class.java))
-        }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        top.addView(settingsGearButton(), LinearLayout.LayoutParams(dp(48), dp(48)))
         content.addView(top)
 
         val tagline = text("חיבור אלחוטי, גיבוי אפליקציות וכלי מערכת — במקום אחד.", 13,
@@ -100,7 +109,7 @@ class DashboardActivity : AppCompatActivity() {
             startActivity(Intent(this, ConnectionActivity::class.java))
         }, LinearLayout.LayoutParams(-1, dp(47)).apply { topMargin = dp(8) })
 
-        content.addView(sectionTitle("כלי ADB נוספים", "כל היכולות הקיימות נשארות זמינות"))
+        content.addView(sectionTitle("כלי ADB נוספים"))
         val tools = listOf(
             Tool("ניהול אפליקציות", "הסרה, השבתה והפעלה", Color.rgb(46, 114, 167)) {
                 startActivity(Intent(this, AppManagerHubActivity::class.java))
@@ -110,9 +119,6 @@ class DashboardActivity : AppCompatActivity() {
             },
             Tool("מסוף ADB + AI", "פקודות, סוכן חכם ופלט", Color.rgb(101, 84, 165)) {
                 startActivity(Intent(this, MainActivity::class.java))
-            },
-            Tool("הגדרות", "חיבור, מודלים והעדפות", Color.rgb(150, 104, 52)) {
-                startActivity(Intent(this, SettingsActivity::class.java))
             }
         )
         tools.chunked(2).forEach { pair ->
@@ -173,16 +179,62 @@ class DashboardActivity : AppCompatActivity() {
         return card
     }
 
-    private fun sectionTitle(title: String, subtitle: String): View {
-        val wrap = LinearLayout(this).apply {
+    private fun sectionTitle(title: String): View {
+        return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(20), 0, dp(5))
+            addView(text(title, 18, palette.text, true))
         }
-        wrap.addView(text(title, 18, palette.text, true))
-        wrap.addView(text(subtitle, 11, palette.muted, false).apply {
-            setPadding(0, dp(3), 0, 0)
-        })
-        return wrap
+    }
+
+    private fun settingsGearButton(): TextView = TextView(this).apply {
+        text = "⚙"
+        textSize = 23f
+        gravity = Gravity.CENTER
+        setTextColor(palette.accent)
+        background = rounded(palette.surface, dp(15), palette.outline)
+        isClickable = true
+        isFocusable = true
+        setOnClickListener { startActivity(Intent(this@DashboardActivity, SettingsActivity::class.java)) }
+    }
+
+    private fun requestNotificationsThenShowGuide() {
+        val prefs = getSharedPreferences("first_run", MODE_PRIVATE)
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            !prefs.getBoolean("notification_permission_requested", false)
+        ) {
+            prefs.edit().putBoolean("notification_permission_requested", true).apply()
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            showFirstRunGuideIfNeeded()
+        }
+    }
+
+    private fun showFirstRunGuideIfNeeded() {
+        val prefs = getSharedPreferences("first_run", MODE_PRIVATE)
+        if (prefs.getBoolean("guide_shown", false)) return
+        val message = "כדי להתחבר בפעם הראשונה:\n\n" +
+            "1. אם אפשרויות למפתחים עדיין לא מופעלות: פתח הגדרות Android ← אודות הטלפון והקש 7 פעמים על מספר Build.\n\n" +
+            "2. פתח אפשרויות למפתחים והפעל ניפוי באגים אלחוטי.\n\n" +
+            "3. בחר „שיוך מכשיר באמצעות קוד” והשאר את חלון הקוד פתוח.\n\n" +
+            "4. משוך את סרגל ההתראות, הקלד שם את קוד 6 הספרות ולחץ „אישור אוטומטי”. אין צורך להעתיק פורט או להשתמש במסך מפוצל."
+        AlertDialog.Builder(this)
+            .setTitle("ברוך הבא ל־ADB חכם – מדריך התחברות")
+            .setMessage(message)
+            .setPositiveButton("הבנתי, המשך") { _, _ ->
+                prefs.edit().putBoolean("guide_shown", true).apply()
+            }
+            .setNeutralButton("פתח אפשרויות למפתחים") { _, _ ->
+                prefs.edit().putBoolean("guide_shown", true).apply()
+                runCatching { startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
+            }
+            .setNegativeButton("פתח אודות הטלפון") { _, _ ->
+                prefs.edit().putBoolean("guide_shown", true).apply()
+                runCatching { startActivity(Intent(android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS)) }
+            }
+            .setCancelable(false)
+            .show()
     }
 
     private fun updateConnection(connected: Boolean) {

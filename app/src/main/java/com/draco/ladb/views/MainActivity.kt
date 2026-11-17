@@ -43,7 +43,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var output: TextView
     private lateinit var outputScroll: ScrollView
     private var pendingPresetCommand: String? = null
-    private var pairDialogShowing = false
     private lateinit var command: EditText
     private lateinit var aiRequest: EditText
     private val apkPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -61,8 +60,8 @@ class MainActivity : AppCompatActivity() {
             orientation=LinearLayout.HORIZONTAL
             layoutDirection=View.LAYOUT_DIRECTION_RTL
             gravity=Gravity.CENTER_VERTICAL
-            addView(button("⚙"){ startActivity(Intent(this@MainActivity,SettingsActivity::class.java)) },
-                LinearLayout.LayoutParams(dp(58),dp(52)).apply { setMargins(0,0,dp(8),0) })
+            addView(settingsGearButton(),
+                LinearLayout.LayoutParams(dp(48),dp(48)).apply { setMargins(0,0,dp(8),0) })
             addView(LinearLayout(this@MainActivity).apply {
                 orientation=LinearLayout.VERTICAL
                 addView(label("ADB חכם",27f).apply { setTextColor(blue); typeface=Typeface.DEFAULT_BOLD })
@@ -99,7 +98,7 @@ class MainActivity : AppCompatActivity() {
                     pair.forEachIndexed { index, entry ->
                         val color = listOf(Color.rgb(28,125,205),Color.rgb(20,150,135),Color.rgb(109,89,190),Color.rgb(210,126,37))[(rowIndex*2+index)%4]
                         addView(tile(entry.first,color,entry.second),
-                            LinearLayout.LayoutParams(0,dp(78),1f).apply { setMargins(dp(4),dp(4),dp(4),dp(4)) })
+                            LinearLayout.LayoutParams(0,dp(74),1f).apply { setMargins(dp(3),dp(3),dp(3),dp(3)) })
                     }
                     if(pair.size==1) addView(Space(this@MainActivity),LinearLayout.LayoutParams(0,dp(78),1f))
                 })
@@ -172,9 +171,13 @@ class MainActivity : AppCompatActivity() {
             addView(outputScroll,LinearLayout.LayoutParams(-1,dp(300)))
             addView(button("הסבר את הפלט בעזרת AI"){ explainOutput() })
             addView(LinearLayout(this@MainActivity).apply {
-                orientation=LinearLayout.HORIZONTAL
-                addView(button("נקה פלט"){ vm.clearOutputText() },LinearLayout.LayoutParams(0,dp(50),1f).apply { setMargins(dp(3),0,dp(3),0) })
-                addView(button("היסטוריית פקודות"){ showHistory() },LinearLayout.LayoutParams(0,dp(50),1f).apply { setMargins(dp(3),0,dp(3),0) })
+                orientation = LinearLayout.HORIZONTAL
+                layoutDirection = View.LAYOUT_DIRECTION_RTL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(footerAction("נקה פלט") { vm.clearOutputText() },
+                    LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(3), 0, dp(3), 0) })
+                addView(footerAction("היסטוריית פקודות") { showHistory() },
+                    LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(3), 0, dp(3), 0) })
             })
         })
         setContentView(ScrollView(this).apply { isFillViewport=true; addView(root) })
@@ -196,9 +199,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        val guidePrefs=getSharedPreferences("first_run",0)
-        if(!guidePrefs.getBoolean("guide_shown",false)) showFirstRunGuide() 
-        else if(vm.needsToPair()) showPairDialog() else vm.startADBServer()
+        if (!vm.needsToPair()) vm.startADBServer()
     }
     override fun onResume(){
         super.onResume()
@@ -208,20 +209,53 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().remove("command").apply()
             if(vm.adb.running.value==true) runCommand(pending) else pendingPresetCommand=pending
         }
-        val guideShown=getSharedPreferences("first_run",0).getBoolean("guide_shown",false)
-        if(guideShown && vm.needsToPair() && !pairDialogShowing) {
-            window.decorView.post { if(!isFinishing && !pairDialogShowing) showPairDialog() }
-        } else if(guideShown && !vm.needsToPair() && vm.adb.running.value!=true) {
+        if (!vm.needsToPair() && vm.adb.running.value != true) {
             vm.startADBServer()
         }
     }
+    private fun settingsGearButton(): TextView = TextView(this).apply {
+        text = "⚙"
+        textSize = 23f
+        gravity = Gravity.CENTER
+        setTextColor(blue)
+        background = GradientDrawable().apply {
+            setColor(palette.surfaceAlt)
+            cornerRadius = dp(15).toFloat()
+            setStroke(dp(1), palette.outline)
+        }
+        isClickable = true
+        isFocusable = true
+        setOnClickListener { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) }
+    }
+
+    private fun footerAction(title: String, action: () -> Unit): TextView = TextView(this).apply {
+        text = title
+        textSize = 12f
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        includeFontPadding = false
+        maxLines = 1
+        setTextColor(palette.text)
+        setPadding(dp(2), dp(4), dp(2), dp(4))
+        background = GradientDrawable().apply {
+            setColor(palette.surfaceAlt)
+            cornerRadius = dp(12).toFloat()
+            setStroke(dp(1), palette.outline)
+        }
+        isClickable = true
+        isFocusable = true
+        setOnClickListener { action() }
+    }
+
     private fun tile(title:String, color:Int, action:()->Unit):TextView = TextView(this).apply {
         text=title
         textSize=14f
+        maxLines=2
+        includeFontPadding=false
         typeface=Typeface.DEFAULT_BOLD
         gravity=Gravity.CENTER
         setTextColor(Color.WHITE)
-        setPadding(dp(8),dp(8),dp(8),dp(8))
+        setPadding(dp(6),dp(6),dp(6),dp(6))
         background=GradientDrawable().apply {
             setColor(color)
             cornerRadius=dp(16).toFloat()
@@ -230,32 +264,6 @@ class MainActivity : AppCompatActivity() {
         isClickable=true
         isFocusable=true
         setOnClickListener { action() }
-    }
-
-    private fun showFirstRunGuide() {
-        val message = "כדי להתחבר בפעם הראשונה:\\n\\n" +
-            "1. פתח הגדרות Android → אודות הטלפון → מספר Build / מספר גרסה. הקש עליו 7 פעמים עד שתופיע הודעה שאפשרויות למפתחים הופעלו. ייתכן שתידרש סיסמת המכשיר.\\n\\n" +
-            "2. חזור להגדרות → מערכת (או הגדרות נוספות) → אפשרויות למפתחים → הפעל ניפוי באגים אלחוטי. אשר את ההודעה.\\n\\n" +
-            "3. בתוך ניפוי באגים אלחוטי בחר 'שיוך מכשיר באמצעות קוד'. בחלון שיופיע קח את מספר הפורט שמופיע אחרי כתובת ה־IP ואת קוד השיוך בן 6 הספרות.\\n\\n" +
-            "4. חזור לכאן והזן את פורט השיוך ואת הקוד. שים לב: זהו פורט השיוך מהחלון הקטן, לא הפורט שמופיע במסך הראשי של ניפוי באגים אלחוטי.\\n\\n" +
-            "5. לאחר השיוך האפליקציה תאתר ותתחבר לפורט ADB האלחוטי. השאר את ניפוי הבאגים האלחוטי פעיל."
-        AlertDialog.Builder(this)
-            .setTitle("ברוך הבא ל־ADB חכם – מדריך התחברות")
-            .setMessage(message)
-            .setPositiveButton("הבנתי, המשך") { _, _ ->
-                getSharedPreferences("first_run",0).edit().putBoolean("guide_shown",true).apply()
-                if(vm.needsToPair()) showPairDialog() else vm.startADBServer()
-            }
-            .setNeutralButton("פתח אודות הטלפון") { _, _ ->
-                getSharedPreferences("first_run",0).edit().putBoolean("guide_shown",true).apply()
-                try { startActivity(Intent(android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS)) } catch (_:Exception) {}
-            }
-            .setNegativeButton("פתח אפשרויות למפתחים") { _, _ ->
-                getSharedPreferences("first_run",0).edit().putBoolean("guide_shown",true).apply()
-                try { startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) } catch (_:Exception) {}
-            }
-            .setCancelable(false)
-            .show()
     }
 
     private fun installSelectedApks(uris:List<android.net.Uri>) {
@@ -446,129 +454,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showPairDialog(){
-        if(pairDialogShowing) return
-        pairDialogShowing=true
-        // A custom, height-bounded dialog keeps the action buttons visible in split-screen.
-        val dialog = android.app.Dialog(this)
-        val density = resources.displayMetrics.density
-        fun d(value: Int) = (value * density).toInt()
-
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(d(20), d(18), d(20), d(12))
-            background = GradientDrawable().apply {
-                setColor(palette.surface)
-                cornerRadius = d(18).toFloat()
-                setStroke(d(1), palette.outline)
-            }
-        }
-
-        container.addView(label("שיוך ניפוי באגים אלחוטי", 20f).apply {
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(blue)
-        })
-
-        val instructions = label(
-            "בהגדרות Android פתח ניפוי באגים אלחוטי ← שיוך באמצעות קוד. השאר את החלון פתוח והזן כאן את הפורט ואת קוד השיוך.",
-            14f
-        ).apply {
-            setPadding(0, d(8), 0, d(10))
-        }
-        val scroll = ScrollView(this).apply {
-            isFillViewport = false
-            clipToPadding = false
-            addView(LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(instructions)
-            })
-        }
-        val portInput = EditText(this).apply {
-            hint = "פורט שיוך (לדוגמה 39953)"
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            textDirection = View.TEXT_DIRECTION_LTR
-            gravity = Gravity.CENTER_VERTICAL or Gravity.LEFT
-            setSingleLine(true)
-        }
-        val codeInput = EditText(this).apply {
-            hint = "קוד שיוך בן 6 ספרות"
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            textDirection = View.TEXT_DIRECTION_LTR
-            gravity = Gravity.CENTER_VERTICAL or Gravity.LEFT
-            setSingleLine(true)
-        }
-        val fields = scroll.getChildAt(0) as LinearLayout
-        fields.addView(portInput, LinearLayout.LayoutParams(-1, d(56)).apply {
-            bottomMargin = d(10)
-        })
-        fields.addView(codeInput, LinearLayout.LayoutParams(-1, d(56)))
-
-        container.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-
-        val footer = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(0, d(10), 0, 0)
-        }
-        val pairButton = Button(this).apply {
-            text = "שיוך"
-            isAllCaps = false
-            setOnClickListener {
-                val p = portInput.text.toString().trim()
-                val c = codeInput.text.toString().trim()
-                if (p.isBlank() || c.length != 6) {
-                    Toast.makeText(this@MainActivity, "יש להזין פורט וקוד שיוך בן 6 ספרות", Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
-                }
-                isEnabled = false
-                text = "משייך…"
-                dialog.dismiss()
-                lifecycleScope.launch(Dispatchers.IO) {
-                    val ok = vm.adb.pair(p, c)
-                    withContext(Dispatchers.Main) {
-                        if (ok) {
-                            vm.setPairedBefore(true)
-                            vm.startADBServer()
-                        } else {
-                            Toast.makeText(this@MainActivity, "השיוך נכשל. בדוק שהפורט והקוד עדיין בתוקף ונסה שוב.", Toast.LENGTH_LONG).show()
-                            showPairDialog()
-                        }
-                    }
-                }
-            }
-        }
-        val cancelButton = Button(this).apply {
-            text = "ביטול"
-            isAllCaps = false
-            setOnClickListener { dialog.dismiss() }
-        }
-        footer.addView(pairButton, LinearLayout.LayoutParams(0, d(52), 1f).apply {
-            marginEnd = d(6)
-        })
-        footer.addView(cancelButton, LinearLayout.LayoutParams(0, d(52), 1f).apply {
-            marginStart = d(6)
-        })
-        container.addView(footer, LinearLayout.LayoutParams(-1, -2))
-        dialog.setContentView(container)
-        dialog.setCancelable(true)
-        dialog.setOnDismissListener { pairDialogShowing=false }
-        dialog.setOnShowListener {
-            dialog.window?.apply {
-                setBackgroundDrawableResource(android.R.color.transparent)
-                setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-                val availableWidth = resources.displayMetrics.widthPixels - d(32)
-                val availableHeight = (resources.displayMetrics.heightPixels * 0.82f).toInt()
-                setLayout(minOf(availableWidth, d(520)), minOf(availableHeight, d(560)))
-            }
-        }
-        dialog.show()
-        dialog.window?.apply {
-            setBackgroundDrawableResource(android.R.color.transparent)
-            setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-            val availableWidth = resources.displayMetrics.widthPixels - d(32)
-            val availableHeight = (resources.displayMetrics.heightPixels * 0.82f).toInt()
-            setLayout(minOf(availableWidth, d(520)), minOf(availableHeight, d(560)))
-        }
-    }}
+    private fun showPairDialog() {
+        startActivity(Intent(this, ConnectionActivity::class.java))
+    }
+}

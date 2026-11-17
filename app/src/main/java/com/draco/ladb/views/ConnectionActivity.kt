@@ -6,6 +6,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.provider.Settings
+import android.text.InputFilter
 import android.view.Gravity
 import android.view.View
 import android.widget.EditText
@@ -14,20 +15,22 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.RemoteInput
 import androidx.lifecycle.lifecycleScope
 import androidx.activity.viewModels
 import com.draco.ladb.viewmodels.MainActivityViewModel
+import com.draco.ladb.utils.PairingNotification
+import com.draco.ladb.utils.PairingPortDiscovery
 import com.draco.ladb.utils.UiTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Focused Wireless Debugging entry point. No ADB terminal or tools screen is opened. */
+/** Wireless Debugging pairing screen. The notification supplies the code; the app discovers the pairing port. */
 class ConnectionActivity : AppCompatActivity() {
     private val vm: MainActivityViewModel by viewModels()
     private val palette get() = UiTheme.palette(this)
     private lateinit var status: TextView
-    private lateinit var port: EditText
     private lateinit var code: EditText
     private lateinit var pairPanel: LinearLayout
     private lateinit var pairButton: TextView
@@ -41,6 +44,7 @@ class ConnectionActivity : AppCompatActivity() {
         buildScreen()
         vm.adb.running.observe(this) { connected ->
             if (connected == true) {
+                PairingNotification.cancel(this)
                 status.text = "●  מחובר ומוכן לפקודות"
                 status.setTextColor(Color.rgb(25, 155, 105))
                 pairButton.text = "מחובר"
@@ -48,7 +52,7 @@ class ConnectionActivity : AppCompatActivity() {
             } else if (!pairing) {
                 status.text = "○  ממתין לחיבור Wireless Debugging"
                 status.setTextColor(palette.muted)
-                pairButton.text = if (vm.needsToPair()) "שיוך וחיבור" else "התחבר ל־ADB"
+                pairButton.text = if (vm.needsToPair()) "אישור קוד וחיבור" else "התחבר ל־ADB"
                 pairButton.isEnabled = true
             }
         }
@@ -60,10 +64,31 @@ class ConnectionActivity : AppCompatActivity() {
             pairButton.isEnabled = false
         } else if (vm.needsToPair()) {
             pairPanel.visibility = View.VISIBLE
-            status.text = "נדרש שיוך ראשוני עם קוד בן 6 ספרות"
+            status.text = "נדרש שיוך ראשוני — אפשר להזין את הקוד בהתראה שמופיעה למעלה"
+            PairingNotification.show(this)
         } else {
             pairPanel.visibility = View.GONE
             startConnection()
+        }
+        handlePairingReply(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handlePairingReply(intent)
+    }
+
+    private fun handlePairingReply(intent: Intent?) {
+        if (intent == null) return
+        val reply = RemoteInput.getResultsFromIntent(intent)
+            ?.getCharSequence(PairingNotification.INPUT_KEY)
+            ?.toString()
+            ?.filter { it.isDigit() }
+            .orEmpty()
+        if (reply.isNotBlank()) {
+            code.setText(reply)
+            pairWithCode(reply)
         }
     }
 
@@ -86,14 +111,14 @@ class ConnectionActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        header.addView(actionButton("‹", palette.surfaceAlt, Color.WHITE) { finish() },
+        header.addView(actionButton("‹", palette.surfaceAlt, palette.text) { finish() },
             LinearLayout.LayoutParams(dp(44), dp(44)))
         header.addView(text("חיבור Wireless Debugging", 20, palette.text, true),
             LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(10) })
         content.addView(header)
 
         content.addView(text(
-            "המסך הזה מיועד רק לחיבור ולשיוך. לאחר החיבור אפשר לחזור לגיבוי או להיכנס למסוף ADB בנפרד.",
+            "פותחים את מסך השיוך של Android ומשאירים אותו פתוח. הקוד יוזן דרך ההתראה — בלי מסך מפוצל ובלי להעתיק פורט.",
             13, palette.muted, false
         ).apply { setPadding(0, dp(10), 0, dp(16)) })
 
@@ -102,11 +127,15 @@ class ConnectionActivity : AppCompatActivity() {
             setPadding(dp(16), dp(16), dp(16), dp(16))
             background = rounded(palette.surface, dp(17), palette.outline)
         }
-        info.addView(text("כך מתחברים", 17, palette.text, true))
+        info.addView(text("איך מתחברים", 17, palette.text, true))
         info.addView(text(
-            "1. פתח אפשרויות למפתחים והפעל ניפוי באגים אלחוטי.\n" +
-                "2. בחר „שיוך מכשיר באמצעות קוד”.\n" +
-                "3. השאר את חלון השיוך פתוח והזן את הפורט וקוד בן 6 ספרות כאן.",
+            "1. הפעל ניפוי באגים אלחוטי באפשרויות למפתחים.
+" +
+                "2. בחר „שיוך מכשיר באמצעות קוד”.
+" +
+                "3. משוך את סרגל ההתראות, הקלד את קוד 6 הספרות בהתראה ולחץ „אישור אוטומטי”.
+" +
+                "האפליקציה תאתר בעצמה את פורט השיוך ותבצע את החיבור.",
             13, palette.muted, false
         ).apply { setPadding(0, dp(8), 0, 0) })
         content.addView(info)
@@ -122,18 +151,17 @@ class ConnectionActivity : AppCompatActivity() {
             setPadding(dp(15), dp(15), dp(15), dp(15))
             background = rounded(palette.surface, dp(17), palette.outline)
         }
-        pairPanel.addView(text("פרטי השיוך", 16, palette.text, true))
-        port = inputField("פורט שיוך (לדוגמה 39953)", android.text.InputType.TYPE_CLASS_NUMBER)
+        pairPanel.addView(text("אפשרות להזנת קוד ידנית", 16, palette.text, true))
         code = inputField("קוד שיוך בן 6 ספרות", android.text.InputType.TYPE_CLASS_NUMBER)
-        pairPanel.addView(port, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(10) })
-        pairPanel.addView(code, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(9) })
+        code.filters = arrayOf(InputFilter.LengthFilter(6))
+        pairPanel.addView(code, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(10) })
         pairPanel.addView(text(
-            "חשוב: זהו פורט השיוך מחלון הקוד, לא הפורט שמוצג במסך הראשי של Wireless Debugging.",
+            "הזנה ידנית מיועדת למקרה שהרשאת ההתראות לא אושרה או שההתראה לא מופיעה.",
             11, palette.muted, false
         ).apply { setPadding(0, dp(8), 0, 0) })
         content.addView(pairPanel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(13) })
 
-        pairButton = actionButton("התחבר ל־ADB", palette.accent, Color.WHITE) { connectOrPair() }
+        pairButton = actionButton("אישור קוד וחיבור", palette.accent, Color.WHITE) { connectOrPair() }
         content.addView(pairButton, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(13) })
 
         content.addView(actionButton("פתח הגדרות מפתחים / Wireless Debugging", palette.surfaceAlt, palette.text) {
@@ -144,9 +172,9 @@ class ConnectionActivity : AppCompatActivity() {
             }
         }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(9) })
 
-        content.addView(actionButton("שיוך מחדש", palette.surfaceAlt, palette.text) {
+        content.addView(actionButton("הצג שוב את התראת השיוך", palette.surfaceAlt, palette.text) {
             pairPanel.visibility = View.VISIBLE
-            port.requestFocus()
+            PairingNotification.show(this)
         }, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(8) })
 
         page.addView(scroll, LinearLayout.LayoutParams(-1, -1))
@@ -156,35 +184,49 @@ class ConnectionActivity : AppCompatActivity() {
     private fun connectOrPair() {
         if (pairing || vm.adb.running.value == true) return
         if (pairPanel.visibility == View.VISIBLE || vm.needsToPair()) {
-            val portValue = port.text.toString().trim()
-            val codeValue = code.text.toString().trim()
-            if (portValue.toIntOrNull() == null || codeValue.length != 6 || codeValue.any { !it.isDigit() }) {
-                Toast.makeText(this, "יש להזין פורט תקין וקוד בן 6 ספרות.", Toast.LENGTH_LONG).show()
-                return
-            }
-            pairing = true
-            pairButton.isEnabled = false
-            pairButton.text = "משייך את המכשיר…"
-            status.text = "מבצע שיוך מול Wireless Debugging…"
-            lifecycleScope.launch {
-                val result = withContext(Dispatchers.IO) {
-                    runCatching { vm.adb.pair(portValue, codeValue) }.getOrDefault(false)
-                }
-                pairing = false
-                if (result) {
-                    vm.setPairedBefore(true)
-                    pairPanel.visibility = View.GONE
-                    status.text = "השיוך הצליח. מתחבר ל־ADB…"
-                    pairButton.text = "מתחבר…"
-                    startConnection()
-                } else {
-                    pairButton.isEnabled = true
-                    pairButton.text = "נסה שיוך שוב"
-                    status.text = "השיוך נכשל. ודא שהחלון עדיין פתוח ושהקוד והפורט נכונים."
-                }
-            }
+            pairWithCode(code.text.toString().trim())
         } else {
             startConnection()
+        }
+    }
+
+    private fun pairWithCode(pairingCode: String) {
+        if (pairing || vm.adb.running.value == true) return
+        if (pairingCode.length != 6 || pairingCode.any { !it.isDigit() }) {
+            Toast.makeText(this, "יש להזין קוד שיוך בן 6 ספרות.", Toast.LENGTH_LONG).show()
+            PairingNotification.show(this)
+            return
+        }
+        pairing = true
+        pairButton.isEnabled = false
+        pairButton.text = "מאתר פורט ומשייך…"
+        status.text = "מאתר אוטומטית את פורט השיוך ומבצע שיוך…"
+        PairingNotification.cancel(this)
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val pairingPort = PairingPortDiscovery(this@ConnectionActivity).findPairingPort()
+                        ?: error("לא נמצא פורט שיוך. ודא שחלון „שיוך באמצעות קוד” עדיין פתוח ונסה שוב.")
+                    if (!vm.adb.pair(pairingPort.toString(), pairingCode)) {
+                        error("השיוך נכשל. ודא שהקוד עדיין בתוקף ונסה שוב.")
+                    }
+                    true
+                }
+            }
+            pairing = false
+            if (result.isSuccess) {
+                vm.setPairedBefore(true)
+                pairPanel.visibility = View.GONE
+                status.text = "השיוך הצליח. מתחבר ל־ADB…"
+                pairButton.text = "מתחבר…"
+                startConnection()
+            } else {
+                pairButton.isEnabled = true
+                pairButton.text = "נסה שוב"
+                status.text = result.exceptionOrNull()?.message ?: "השיוך נכשל."
+                PairingNotification.show(this)
+                Toast.makeText(this, status.text, Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -196,6 +238,7 @@ class ConnectionActivity : AppCompatActivity() {
         vm.startADBServer { success ->
             runOnUiThread {
                 if (success) {
+                    PairingNotification.cancel(this)
                     status.text = "●  מחובר ומוכן לפקודות"
                     status.setTextColor(Color.rgb(25, 155, 105))
                     pairButton.text = "מחובר"

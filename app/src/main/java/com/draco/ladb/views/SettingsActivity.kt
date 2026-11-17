@@ -66,7 +66,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun refreshModelList(provider: String, key: String, modelField: EditText, status: TextView) {
         if (key.isBlank()) {
-            Toast.makeText(this, "הזן ושמור מפתח API של הספק לפני טעינת מודלים", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "הזן מפתח API של הספק לפני טעינת מודלים", Toast.LENGTH_LONG).show()
             return
         }
         status.text = "טוען מודלים מהספק…"
@@ -115,21 +115,14 @@ class SettingsActivity : AppCompatActivity() {
             gravity = Gravity.RIGHT
         })
         root.addView(heading("מראה האפליקציה"))
-        val darkMode = Switch(this).apply {
-            text = "ממשק כהה"
-            textSize = 14f
-            setTextColor(palette.text)
-            isChecked = palette.dark
-            setOnCheckedChangeListener { _, checked -> UiTheme.setDarkMode(this@SettingsActivity, checked) }
-        }
         root.addView(card().apply {
-            addView(TextView(this@SettingsActivity).apply {
-                text = "בחר עיצוב אחיד לכל מסכי האפליקציה. השינוי יחול גם על מסכי LADB הישנים."
-                textSize = 12f
-                setTextColor(palette.muted)
-                gravity = Gravity.RIGHT
+            addView(Button(this@SettingsActivity).apply {
+                text = if (palette.dark) "עבור לעיצוב בהיר" else "עבור לעיצוב כהה"
+                isAllCaps = false
+                setOnClickListener {
+                    UiTheme.setDarkMode(this@SettingsActivity, !UiTheme.isDark(this@SettingsActivity))
+                }
             })
-            addView(darkMode)
         })
 
         root.addView(heading("הרשאת Root"))
@@ -186,7 +179,7 @@ class SettingsActivity : AppCompatActivity() {
         )
         root.addView(card().apply {
             addView(TextView(this@SettingsActivity).apply {
-                text = "המפתחות נשמרים מוצפנים במכשיר באמצעות Android Keystore."
+                text = "כל מפתח נשמר אוטומטית בזמן ההקלדה ומוצפן במכשיר."
                 textSize = 12f
                 setTextColor(palette.muted)
                 gravity = Gravity.RIGHT
@@ -200,6 +193,15 @@ class SettingsActivity : AppCompatActivity() {
                     setPadding(0, dp(10), 0, 0)
                 })
                 val input = textField(label, value, true)
+                input.addTextChangedListener(object : android.text.TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                    override fun afterTextChanged(s: android.text.Editable?) {
+                        runCatching {
+                            ApiKeyVault.save(this@SettingsActivity, s?.toString()?.trim().orEmpty(), id)
+                        }
+                    }
+                })
                 keys[id] = input
                 addView(input)
             }
@@ -289,9 +291,6 @@ class SettingsActivity : AppCompatActivity() {
             text = "שמירת הגדרות AI"
             isAllCaps = false
             setOnClickListener {
-                keys.forEach { (provider, input) ->
-                    ApiKeyVault.save(this@SettingsActivity, input.text.toString().trim(), provider)
-                }
                 val chosenPrimaryProvider = selectedProvider(primaryProvider)
                 val chosenPrimaryModel = primaryModel.text.toString().trim()
                 val chosenFallbackProvider = selectedProvider(fallbackProvider)

@@ -379,7 +379,6 @@ object AppBackupManager {
                     count++
                     require(count <= MAX_ARCHIVE_ENTRIES) { "קובץ הגיבוי מכיל יותר מדי פריטים." }
                     require(!entry.isDirectory && isSafeEntry(entry.name)) { "נתיב לא בטוח בתוך הגיבוי." }
-                    require(!extracted.containsKey(entry.name) && entry.name != MANIFEST_NAME) { "פריט כפול בגיבוי." }
                     if (entry.name == MANIFEST_NAME) {
                         require(!manifestSeen) { "המניפסט מופיע יותר מפעם אחת." }
                         manifestSeen = true
@@ -387,6 +386,9 @@ object AppBackupManager {
                         require(bytes.size <= 256 * 1024) { "קובץ תיאור הגיבוי גדול מדי." }
                         manifestText = bytes.toString(Charsets.UTF_8)
                     } else {
+                        require(!extracted.containsKey(entry.name)) {
+                            "פריט כפול בגיבוי: ${entry.name}"
+                        }
                         val destination = File(root, entry.name)
                         destination.parentFile?.mkdirs()
                         var written = 0L
