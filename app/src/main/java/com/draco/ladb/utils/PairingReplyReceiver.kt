@@ -7,10 +7,11 @@ import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
 import com.draco.ladb.services.PairingService
 
-/** Starts a foreground service for the time-consuming Wireless Debugging pairing operation. */
+/** Receives the notification reply and hands the work to a foreground service. */
 class PairingReplyReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != PairingNotification.ACTION_PAIR) return
+
         val code = RemoteInput.getResultsFromIntent(intent)
             ?.getCharSequence(PairingNotification.INPUT_KEY)
             ?.toString()
@@ -18,18 +19,21 @@ class PairingReplyReceiver : BroadcastReceiver() {
             .orEmpty()
 
         if (code.length != 6) {
-            PairingNotification.show(context, "יש להזין קוד בן 6 ספרות ולנסות שוב.")
+            PairingNotification.show(context, "הקוד לא תקין. יש להזין בדיוק 6 ספרות ולנסות שוב.")
             return
         }
 
         val serviceIntent = Intent(context, PairingService::class.java)
             .putExtra(PairingService.EXTRA_PAIRING_CODE, code)
+
         try {
+            // Starting a foreground service from the explicit notification action
+            // keeps the pairing operation independent from every Activity/task.
             ContextCompat.startForegroundService(context, serviceIntent)
         } catch (error: Exception) {
             PairingNotification.show(
                 context,
-                error.message ?: "לא ניתן להתחיל את תהליך השיוך. פתח את האפליקציה ונסה שוב."
+                error.message ?: "לא ניתן להתחיל את השיוך ברקע. פתח את האפליקציה ונסה שוב."
             )
         }
     }

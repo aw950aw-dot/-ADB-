@@ -9,9 +9,9 @@
     <style name="Theme.LADB" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="materialButtonStyle">@style/Widget.ADBSmart.Button</item>
         <item name="colorPrimary">#1769D2</item>
-        <item name="colorPrimaryVariant">#0D47A1</item>
-        <item name="colorSecondary">#21A99A</item>
-        <item name="android:statusBarColor">#F5F8FD</item>
+        <item name="colorPrimaryVariant">#0C4FA3</item>
+        <item name="colorSecondary">#0F9F93</item>
+        <item name="android:statusBarColor">#F4F8FD</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:navigationBarColor">#FFFFFF</item>
         <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item>

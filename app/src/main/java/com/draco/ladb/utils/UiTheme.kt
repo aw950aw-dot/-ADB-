@@ -44,29 +44,29 @@ object UiTheme {
     fun palette(context: Context): UiPalette = if (isDark(context)) {
         UiPalette(
             true,
-            Color.rgb(8, 14, 27),
-            Color.rgb(18, 30, 48),
-            Color.rgb(24, 39, 60),
-            Color.rgb(239, 245, 255),
-            Color.rgb(151, 169, 193),
-            Color.rgb(73, 153, 230),
-            Color.rgb(48, 68, 94),
-            Color.rgb(20, 33, 51),
-            Color.rgb(8, 14, 27),
-            Color.rgb(8, 14, 27)
+            Color.rgb(6, 13, 26),
+            Color.rgb(15, 28, 46),
+            Color.rgb(23, 40, 62),
+            Color.rgb(239, 246, 255),
+            Color.rgb(151, 171, 196),
+            Color.rgb(65, 164, 245),
+            Color.rgb(47, 68, 94),
+            Color.rgb(11, 23, 39),
+            Color.rgb(6, 13, 26),
+            Color.rgb(6, 13, 26)
         )
     } else {
         UiPalette(
             false,
-            Color.rgb(245, 248, 253),
+            Color.rgb(244, 248, 253),
             Color.WHITE,
-            Color.rgb(235, 242, 250),
-            Color.rgb(26, 42, 62),
-            Color.rgb(91, 110, 132),
+            Color.rgb(233, 241, 251),
+            Color.rgb(24, 41, 63),
+            Color.rgb(91, 111, 134),
             Color.rgb(23, 105, 210),
-            Color.rgb(215, 226, 239),
+            Color.rgb(211, 225, 240),
             Color.WHITE,
-            Color.rgb(245, 248, 253),
+            Color.rgb(244, 248, 253),
             Color.WHITE
         )
     }

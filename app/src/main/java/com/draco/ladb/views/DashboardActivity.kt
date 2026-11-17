@@ -19,6 +19,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import com.draco.ladb.utils.ADB
 import com.draco.ladb.utils.UiTheme
 import com.draco.ladb.utils.UiComponents
+import com.draco.ladb.utils.PairingNotification
 
 /** Redesigned landing screen. Existing LADB tools remain available as separate destinations. */
 class DashboardActivity : AppCompatActivity() {
@@ -27,6 +28,7 @@ class DashboardActivity : AppCompatActivity() {
     private lateinit var connection: TextView
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            showPairingNotificationIfNeeded()
             showFirstRunGuideIfNeeded()
         }
 
@@ -48,12 +50,13 @@ class DashboardActivity : AppCompatActivity() {
     private fun buildDashboard() {
         window.statusBarColor = palette.statusBar
         window.navigationBarColor = palette.navigationBar
-        window.decorView.systemUiVisibility = if (palette.dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        window.decorView.systemUiVisibility =
+            if (palette.dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
 
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(dp(18), dp(18), dp(18), dp(24))
+            setPadding(dp(18), dp(14), dp(18), dp(22))
             setBackgroundColor(palette.background)
         }
         val scroll = ScrollView(this).apply { isFillViewport = true }
@@ -66,94 +69,112 @@ class DashboardActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        brand.addView(text("ADB SMART  /  CONTROL", 10, Color.rgb(97, 199, 226), true))
-        brand.addView(text("מרכז שליטה לאנדרואיד", 23, palette.text, true).apply {
+        brand.addView(text("ADB SMART  •  DEVICE CONTROL", 9, palette.accent, true))
+        brand.addView(text("מרכז שליטה למכשיר", 24, palette.text, true).apply {
             setPadding(0, dp(3), 0, 0)
         })
         top.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
         top.addView(settingsGearButton(), LinearLayout.LayoutParams(dp(48), dp(48)))
         content.addView(top)
-
-        val tagline = text("חיבור אלחוטי, גיבוי אפליקציות וכלי מערכת — במקום אחד.", 13,
-            palette.muted, false)
-        tagline.setPadding(0, dp(7), 0, dp(16))
-        content.addView(tagline)
+        content.addView(text(
+            "כלי חיבור, גיבוי וניהול Android — במסך אחד.",
+            13, palette.muted, false
+        ).apply { setPadding(0, dp(6), 0, dp(16)) })
 
         val hero = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(19), dp(19), dp(19), dp(19))
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                intArrayOf(Color.rgb(31, 91, 145), Color.rgb(26, 62, 105), Color.rgb(23, 43, 75))
+                intArrayOf(Color.rgb(26, 103, 166), Color.rgb(20, 70, 123), Color.rgb(12, 39, 72))
             ).apply { cornerRadius = dp(24).toFloat() }
+            elevation = dp(3).toFloat()
         }
-        hero.addView(text("גיבוי ושחזור\nאפליקציות ונתונים", 28, Color.WHITE, true).apply {
-            setPadding(0, dp(10), 0, dp(6))
+        hero.addView(text("BACKUP CENTER  /  01", 10, Color.rgb(143, 219, 255), true))
+        hero.addView(text("גיבוי ושחזור\\nאפליקציות ונתונים", 27, Color.WHITE, true).apply {
+            setPadding(0, dp(9), 0, dp(7))
         })
         hero.addView(text(
-            "יצירת ZIP להעברה בין מכשירים: APK, קובצי Split ונתונים שניתן לגשת אליהם באמצעות ADB או Root.",
-            13, Color.rgb(212, 229, 247), false
+            "צור קובץ ZIP להעברה בין מכשירים, כולל APK, קובצי Split ונתונים שהמערכת מאפשרת לגבות.",
+            13, Color.rgb(220, 236, 251), false
         ))
-        hero.addView(actionButton("פתח מרכז גיבוי ושחזור  →", Color.rgb(11, 21, 38)) {
+        hero.addView(actionButton("פתח מרכז גיבוי ושחזור  ←", Color.rgb(8, 29, 52)) {
             startActivity(Intent(this, AppTransferActivity::class.java))
-        }, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(16) })
+        }, LinearLayout.LayoutParams(-1, dp(51)).apply { topMargin = dp(16) })
         content.addView(hero)
 
-        connection = text("בודק חיבור Wireless Debugging…", 13, Color.rgb(253, 186, 116), true).apply {
-            setPadding(dp(14), dp(13), dp(14), dp(13))
-            background = rounded(Color.rgb(40, 34, 34), dp(14))
+        val statusPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(15), dp(14), dp(15), dp(14))
+            background = UiComponents.surface(this@DashboardActivity, palette.surface, 19, palette.outline)
+            elevation = dp(2).toFloat()
         }
-        content.addView(connection, LinearLayout.LayoutParams(-1, -2).apply {
-            topMargin = dp(13)
-        })
-        content.addView(actionButton("התחברות / שיוך Wireless Debugging", palette.accent) {
+        val statusHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        statusHeader.addView(text("WIRELESS DEBUGGING", 9, palette.accent, true),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        statusHeader.addView(text("●  חיבור", 11, palette.muted, true))
+        statusPanel.addView(statusHeader)
+        connection = text("בודק חיבור ADB…", 13, palette.text, true).apply {
+            setPadding(dp(11), dp(12), dp(11), dp(12))
+            background = rounded(palette.surfaceAlt, dp(12), palette.outline)
+        }
+        statusPanel.addView(connection, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(9) })
+        statusPanel.addView(actionButton("התחברות / שיוך Wireless Debugging", palette.accent) {
             startActivity(Intent(this, ConnectionActivity::class.java))
-        }, LinearLayout.LayoutParams(-1, dp(47)).apply { topMargin = dp(8) })
+        }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
+        content.addView(statusPanel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
 
-        content.addView(sectionTitle("כלי ADB נוספים"))
+        content.addView(sectionTitle("כלי עבודה"))
         val tools = listOf(
-            Tool("ניהול אפליקציות", "הסרה, השבתה והפעלה", Color.rgb(46, 114, 167)) {
+            Tool("ניהול אפליקציות", "הסרה, השבתה והפעלה", Color.rgb(42, 126, 190)) {
                 startActivity(Intent(this, AppManagerHubActivity::class.java))
             },
-            Tool("פקודות מוכנות", "ספריית פקודות לפי קטגוריות", Color.rgb(42, 132, 122)) {
+            Tool("פקודות מוכנות", "פעולות מערכת מסודרות", Color.rgb(25, 145, 130)) {
                 startActivity(Intent(this, PresetsActivity::class.java))
             },
-            Tool("מסוף ADB + AI", "פקודות, סוכן חכם ופלט", Color.rgb(101, 84, 165)) {
+            Tool("מסוף ADB + AI", "פקודות, סוכן חכם ופלט", Color.rgb(111, 94, 188)) {
                 startActivity(Intent(this, MainActivity::class.java))
+            },
+            Tool("עזרה והדרכה", "הוראות שימוש וחיבור", Color.rgb(194, 124, 48)) {
+                startActivity(Intent(this, HelpActivity::class.java))
             }
         )
         tools.chunked(2).forEach { pair ->
-            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutDirection = View.LAYOUT_DIRECTION_RTL
+            }
             pair.forEach { tool ->
-                row.addView(toolCard(tool), LinearLayout.LayoutParams(0, dp(112), 1f).apply {
+                row.addView(toolCard(tool), LinearLayout.LayoutParams(0, dp(126), 1f).apply {
                     setMargins(dp(4), dp(4), dp(4), dp(4))
                 })
             }
-            if (pair.size == 1) row.addView(View(this), LinearLayout.LayoutParams(0, dp(112), 1f))
             content.addView(row)
         }
 
         val note = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(15), dp(14), dp(15), dp(14))
-            background = rounded(palette.surface, dp(16), palette.outline)
+            background = UiComponents.surface(this@DashboardActivity, palette.surface, 17, palette.outline)
         }
-        note.addView(text("חשוב לגבי גיבוי נתונים פרטיים", 14, palette.text, true))
+        note.addView(text("גיבוי נתונים פרטיים", 14, palette.text, true))
         note.addView(text(
-            "ADB רגיל אינו עוקף את ארגז החול של Android. תיקיות פרטיות יועתקו רק עם הרשאת Root לאפליקציה, או עם run-as באפליקציה שמאפשרת זאת. בדוח הגיבוי יוצגו במדויק הנתונים שנכללו.",
+            "נתונים פרטיים של אפליקציות רגילות מחייבים הרשאת Root. ללא Root ניתן לגבות APK ונתונים משותפים שהמערכת מתירה לקרוא. דוח הגיבוי מפרט מה נכלל ומה לא.",
             12, palette.muted, false
         ).apply { setPadding(0, dp(6), 0, 0) })
-        content.addView(note, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
+        content.addView(note, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(13) })
 
         content.addView(text("ADB SMART  •  Wireless tools", 10, palette.muted, true).apply {
             gravity = Gravity.CENTER
-            setPadding(0, dp(20), 0, 0)
+            setPadding(0, dp(18), 0, 0)
         })
         page.addView(scroll, LinearLayout.LayoutParams(-1, -1))
         setContentView(page)
         UiComponents.applySystemBars(this, page, palette)
     }
-
     private data class Tool(
         val title: String,
         val subtitle: String,
@@ -165,22 +186,32 @@ class DashboardActivity : AppCompatActivity() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(13), dp(13), dp(13), dp(13))
-            background = UiComponents.surface(this@DashboardActivity, palette.surface, 17, palette.outline, clickable = true)
+            setPadding(dp(14), dp(13), dp(14), dp(13))
+            background = UiComponents.surface(this@DashboardActivity, palette.surface, 19, palette.outline, clickable = true)
+            elevation = dp(2).toFloat()
             isClickable = true
             isFocusable = true
             setOnClickListener { tool.action() }
         }
-        card.addView(View(this).apply {
-            background = rounded(tool.color, dp(8))
-        }, LinearLayout.LayoutParams(dp(28), dp(5)))
+        val glyph = when (tool.title) {
+            "ניהול אפליקציות" -> "▦"
+            "פקודות מוכנות" -> "⌘"
+            "מסוף ADB + AI" -> "›_"
+            else -> "?"
+        }
+        card.addView(TextView(this).apply {
+            text = glyph
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            background = rounded(tool.color, dp(12))
+        }, LinearLayout.LayoutParams(dp(42), dp(42)))
         card.addView(text(tool.title, 15, palette.text, true).apply {
-            setPadding(0, dp(12), 0, dp(4))
+            setPadding(0, dp(10), 0, dp(3))
         })
         card.addView(text(tool.subtitle, 11, palette.muted, false))
         return card
     }
-
     private fun sectionTitle(title: String): View {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -203,7 +234,19 @@ class DashboardActivity : AppCompatActivity() {
             prefs.edit().putBoolean("notification_permission_requested", true).apply()
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
+            showPairingNotificationIfNeeded()
             showFirstRunGuideIfNeeded()
+        }
+    }
+
+    private fun showPairingNotificationIfNeeded() {
+        if (adb.running.value != true) {
+            PairingNotification.show(
+                this,
+                "השאר את ההתראה זמינה. הזן כאן את קוד השיוך בזמן שמסך Wireless Debugging פתוח."
+            )
+        } else {
+            PairingNotification.cancel(this)
         }
     }
 
@@ -223,6 +266,7 @@ class DashboardActivity : AppCompatActivity() {
             }
             .setNeutralButton("פתח אפשרויות למפתחים") { _, _ ->
                 prefs.edit().putBoolean("guide_shown", true).apply()
+                PairingNotification.show(this@DashboardActivity)
                 runCatching { startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
             }
             .setNegativeButton("פתח אודות הטלפון") { _, _ ->
@@ -236,11 +280,12 @@ class DashboardActivity : AppCompatActivity() {
     private fun updateConnection(connected: Boolean) {
         if (!::connection.isInitialized) return
         connection.text = if (connected) "●  ADB מחובר — המכשיר מוכן לפקודות"
-            else "○  ADB ממתין לחיבור — פתח את מסך השיוך"
+            else "○  ADB ממתין לחיבור — אפשר להזין קוד מההתראה"
         connection.setTextColor(if (connected) Color.rgb(110, 231, 183) else Color.rgb(253, 186, 116))
         connection.background = rounded(
             if (connected) Color.rgb(17, 49, 48) else palette.surfaceAlt, dp(14), palette.outline
         )
+        if (connected) PairingNotification.cancel(this) else showPairingNotificationIfNeeded()
     }
 
     private fun actionButton(label: String, color: Int, action: () -> Unit): TextView =

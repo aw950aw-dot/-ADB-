@@ -3,26 +3,34 @@ package com.draco.ladb.utils
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
-import java.io.IOException
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.NetworkInterface
-import java.net.ServerSocket
+import java.net.Socket
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Finds the ephemeral Wireless Debugging pairing port advertised by Android. */
+/** Finds the Wireless Debugging pairing port advertised by this device over local NSD. */
 class PairingPortDiscovery(context: Context) {
     private val manager = context.applicationContext.getSystemService(Context.NSD_SERVICE) as NsdManager
 
     @Suppress("DEPRECATION")
-    fun findPairingPort(timeoutMillis: Long = 15_000L): Int? {
+    fun findPairingPort(timeoutMillis: Long = 25_000L): Int? {
         val foundPort = AtomicInteger(-1)
         val finished = CountDownLatch(1)
         val resolving = AtomicBoolean(false)
         val pending = ConcurrentLinkedQueue<NsdServiceInfo>()
+
+        fun localAddresses(): List<InetAddress> = runCatching {
+            val interfaces = NetworkInterface.getNetworkInterfaces() ?: return@runCatching emptyList()
+            interfaces.asSequence()
+                .filter { runCatching { it.isUp }.getOrDefault(false) }
+                .flatMap { it.inetAddresses.asSequence() }
+                .toList()
+        }.getOrDefault(emptyList())
 
         lateinit var resolveNext: () -> Unit
         resolveNext = {
@@ -30,7 +38,6 @@ class PairingPortDiscovery(context: Context) {
                 val next = pending.poll()
                 if (next == null) {
                     resolving.set(false)
-                    // Cover the narrow race where a service arrives as the queue becomes empty.
                     if (pending.isNotEmpty()) resolveNext()
                 } else {
                     try {
@@ -43,36 +50,27 @@ class PairingPortDiscovery(context: Context) {
                             override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
                                 try {
                                     val port = serviceInfo.port
-                                    if (port in 1..65535) {
-                                        // Ignore other phones/tablets that may advertise pairing on the same Wi-Fi.
-                                        val serviceHost = serviceInfo.host?.hostAddress?.substringBefore('%')
-                                        val localHosts = runCatching {
-                                            val interfaces = NetworkInterface.getNetworkInterfaces()
-                                            if (interfaces == null) emptySet() else interfaces.asSequence()
-                                                .filter { it.isUp && !it.isLoopback }
-                                                .flatMap { it.inetAddresses.asSequence() }
-                                                .map { it.hostAddress.substringBefore('%') }
-                                                .toSet()
-                                        }.getOrDefault(emptySet())
-                                        val belongsToThisDevice = serviceHost != null && serviceHost in localHosts
+                                    val host = serviceInfo.host
+                                    if (port in 1..65535 && host != null) {
+                                        val local = localAddresses()
+                                        val belongsToThisDevice =
+                                            host.isLoopbackAddress ||
+                                                local.any { it.address.contentEquals(host.address) }
 
-                                        // Test the actual local interface addresses, not only loopback:
-                                        // Android may bind the pairing daemon to the Wi-Fi address.
-                                        val portIsOccupiedLocally = belongsToThisDevice && localHosts.any { host ->
-                                            try {
-                                                ServerSocket().use {
-                                                    it.reuseAddress = false
-                                                    it.bind(InetSocketAddress(host, port), 1)
-                                                    false
+                                        // Do not select a pairing server advertised by another
+                                        // phone on the same Wi-Fi. Verify the resolved endpoint
+                                        // is one of this device's own addresses and is listening.
+                                        val reachable = if (belongsToThisDevice) {
+                                            runCatching {
+                                                Socket().use { socket ->
+                                                    socket.connect(InetSocketAddress(host, port), 900)
                                                 }
-                                            } catch (_: IOException) {
-                                                true
-                                            } catch (_: Exception) {
-                                                false
-                                            }
+                                            }.isSuccess
+                                        } else {
+                                            false
                                         }
 
-                                        if (belongsToThisDevice && portIsOccupiedLocally) {
+                                        if (belongsToThisDevice && reachable) {
                                             foundPort.set(port)
                                             finished.countDown()
                                         }
@@ -96,7 +94,6 @@ class PairingPortDiscovery(context: Context) {
 
             override fun onServiceFound(service: NsdServiceInfo) {
                 if (!service.serviceType.orEmpty().contains("_adb-tls-pairing", ignoreCase = true)) return
-                // Resolve serially: Android limits concurrent NSD resolve requests.
                 pending.add(service)
                 resolveNext()
             }
@@ -120,7 +117,7 @@ class PairingPortDiscovery(context: Context) {
 
         return try {
             manager.discoverServices("_adb-tls-pairing._tcp.", NsdManager.PROTOCOL_DNS_SD, listener)
-            finished.await(timeoutMillis, TimeUnit.MILLISECONDS)
+            finished.await(timeoutMillis.coerceAtLeast(1_000L), TimeUnit.MILLISECONDS)
             foundPort.get().takeIf { it in 1..65535 }
         } catch (_: Exception) {
             null
