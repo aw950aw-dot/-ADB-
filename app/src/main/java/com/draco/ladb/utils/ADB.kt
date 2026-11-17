@@ -390,20 +390,50 @@ class ADB(private val context: Context) {
      * Wait restart the shell once it dies
      */
     fun waitForDeathAndReset() {
-        while (true) {
-            /* Do not falsely claim the shell is dead if we haven't even initialized it yet */
-            if (tryingToPair) {
-                Thread.sleep(150)
-                continue
+        while (!Thread.currentThread().isInterrupted) {
+            try {
+                if (tryingToPair) {
+                    Thread.sleep(150)
+                    continue
+                }
+
+                val watchedProcess = shellProcess
+                if (watchedProcess == null) {
+                    Thread.sleep(500)
+                    continue
+                }
+
+                watchedProcess.waitFor()
+                if (shellProcess !== watchedProcess) continue
+
+                shellProcess = null
+                _running.postValue(false)
+                _closed.postValue(true)
+                debug("חיבור ADB נותק. מנסה להתחבר מחדש…")
+
+                runCatching {
+                    val killer = adb(false, listOf("kill-server"))
+                    if (!killer.waitFor(5, TimeUnit.SECONDS)) killer.destroyForcibly()
+                }
+                Thread.sleep(3_000)
+                val restored = runCatching { initServer() }.getOrDefault(false)
+                if (!restored) {
+                    debug("החיבור מחדש לא הצליח. אפשר לנסות להתחבר ממסך החיבור.")
+                    Thread.sleep(5_000)
+                } else {
+                    _closed.postValue(false)
+                }
+            } catch (interrupted: InterruptedException) {
+                Thread.currentThread().interrupt()
+                break
+            } catch (error: Exception) {
+                _running.postValue(false)
+                debug("שגיאה בניטור החיבור: ${error.message ?: "לא ידועה"}")
+                try { Thread.sleep(3_000) } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
             }
-
-            shellProcess?.waitFor()
-            _running.postValue(false)
-            debug("Shell is dead, resetting...")
-            adb(false, listOf("kill-server")).waitFor()
-
-            Thread.sleep(3_000)
-            initServer()
         }
     }
 
@@ -494,14 +524,10 @@ class ADB(private val context: Context) {
                 environment().put("TMPDIR", context.cacheDir.path)
             }
             .start()
-        val finished = process.waitFor(120, TimeUnit.SECONDS)
-        if (!finished) {
-            process.destroyForcibly()
-            throw IllegalStateException("התקנת APK חרגה מזמן ההמתנה")
-        }
-        val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+        val (exitCode, capturedOutput) = captureProcessOutput(process, 120, "התקנת APK חרגה מזמן ההמתנה")
+        val output = capturedOutput.trim()
         debug("APK INSTALL: " + file.name + "\n" + output)
-        if (process.exitValue() != 0 || !output.contains("Success", ignoreCase = true)) {
+        if (exitCode != 0 || !output.contains("Success", ignoreCase = true)) {
             throw IllegalStateException(output.ifBlank { "ADB install נכשל" })
         }
         return output
@@ -588,6 +614,43 @@ class ADB(private val context: Context) {
     }
 
     data class CommandResult(val exitCode: Int, val output: String)
+
+    /** Drains process output while waiting, preventing a full stdout pipe from deadlocking ADB. */
+    private fun captureProcessOutput(
+        process: Process,
+        timeoutSeconds: Long,
+        timeoutMessage: String
+    ): Pair<Int, String> {
+        val output = java.io.ByteArrayOutputStream()
+        val reader = Thread {
+            runCatching {
+                process.inputStream.use { input ->
+                    val buffer = ByteArray(8 * 1024)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        synchronized(output) {
+                            val remaining = (2 * 1024 * 1024 - output.size()).coerceAtLeast(0)
+                            if (remaining > 0) output.write(buffer, 0, minOf(count, remaining))
+                        }
+                    }
+                }
+            }
+        }.apply { isDaemon = true; name = "ADBProcessOutput"; start() }
+
+        if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+            process.destroyForcibly()
+            reader.join(2_000)
+            throw IllegalStateException(timeoutMessage)
+        }
+        reader.join(5_000)
+        if (reader.isAlive) {
+            process.destroyForcibly()
+            throw IllegalStateException("קריאת פלט ADB לא הסתיימה בזמן.")
+        }
+        val text = synchronized(output) { output.toString("UTF-8") }
+        return process.exitValue() to text
+    }
 
     private fun processForAdb(arguments: List<String>, mergeError: Boolean = false): Process {
         return ProcessBuilder(listOf(adbPath) + arguments)
@@ -725,13 +788,10 @@ class ADB(private val context: Context) {
                 environment().put("TMPDIR", context.cacheDir.path)
             }
             .start()
-        if (!process.waitFor(180, TimeUnit.SECONDS)) {
-            process.destroyForcibly()
-            throw IllegalStateException("התקנת חבילת APK חרגה מזמן ההמתנה")
-        }
-        val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+        val (exitCode, capturedOutput) = captureProcessOutput(process, 180, "התקנת חבילת APK חרגה מזמן ההמתנה")
+        val output = capturedOutput.trim()
         debug("APK SET INSTALL:\n$output")
-        if (process.exitValue() != 0 || !output.contains("Success", ignoreCase = true)) {
+        if (exitCode != 0 || !output.contains("Success", ignoreCase = true)) {
             throw IllegalStateException(output.ifBlank { "התקנת חבילת APK נכשלה" })
         }
         return output
