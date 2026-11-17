@@ -6,6 +6,7 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.io.OutputStreamWriter
+import java.io.InputStream
 
 object AiProviderClient {
     data class Answer(val text: String, val provider: String, val model: String, val usedFallback: Boolean)
@@ -58,6 +59,21 @@ object AiProviderClient {
         else -> provider
     }
 
+    private fun readLimited(stream: InputStream?, maxBytes: Int): String {
+        if (stream == null) return ""
+        val output = java.io.ByteArrayOutputStream()
+        stream.use { input ->
+            val buffer = ByteArray(8 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                require(output.size() + count <= maxBytes) { "תגובת ספק ה־AI גדולה מדי." }
+                output.write(buffer, 0, count)
+            }
+        }
+        return output.toString("UTF-8")
+    }
+
     private fun call(context: Context, target: Target, key: String, prompt: String, maxTokens: Int): String {
         val prefs = context.getSharedPreferences("ai_settings", 0)
         val endpoint = when (target.provider) {
@@ -69,6 +85,7 @@ object AiProviderClient {
         }
         if (!endpoint.startsWith("https://")) throw IllegalArgumentException("כתובת API חייבת להתחיל ב־HTTPS")
         val connection = URL(endpoint).openConnection() as HttpURLConnection
+        try {
         connection.requestMethod = "POST"
         connection.connectTimeout = 20000
         connection.readTimeout = 45000
@@ -97,7 +114,7 @@ object AiProviderClient {
         OutputStreamWriter(connection.outputStream).use { it.write(body.toString()) }
         val status = connection.responseCode
         val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-        val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        val raw = readLimited(stream, 4 * 1024 * 1024)
         if (status !in 200..299) throw ApiFailure(status, "HTTP " + status + ": " + raw.take(1600))
         val json = JSONObject(raw)
         val answer = when (target.provider) {
@@ -115,6 +132,9 @@ object AiProviderClient {
         return answer.trim().ifBlank {
             throw IllegalStateException("המודל החזיר תשובה ריקה")
         }
+        } finally {
+            connection.disconnect()
+        }
     }
 
     fun listModels(context: Context, provider: String, key: String): List<Pair<String, String>> {
@@ -126,6 +146,7 @@ object AiProviderClient {
             else -> return emptyList()
         }
         val connection = URL(endpoint).openConnection() as HttpURLConnection
+        try {
         connection.requestMethod = "GET"
         connection.connectTimeout = 15000
         connection.readTimeout = 20000
@@ -157,5 +178,8 @@ object AiProviderClient {
             result.add(Pair(id, label))
         }
         return result.distinctBy { it.first }.sortedBy { it.second }
+        } finally {
+            connection.disconnect()
+        }
     }
 }

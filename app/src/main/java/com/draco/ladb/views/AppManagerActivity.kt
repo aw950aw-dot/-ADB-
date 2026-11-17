@@ -3,8 +3,6 @@ package com.draco.ladb.views
 import android.app.AlertDialog
 import android.app.ProgressDialog
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -51,7 +49,7 @@ class AppManagerActivity : AppCompatActivity() {
     private var allEntries: List<AppEntry> = emptyList()
     private lateinit var searchInput: EditText
     private lateinit var sortSpinner: Spinner
-    private val handler = Handler(Looper.getMainLooper())
+    private var loadGeneration = 0
     private var actionInProgress = false
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
@@ -147,31 +145,49 @@ class AppManagerActivity : AppCompatActivity() {
     }
 
     private fun loadApps() {
-        try {
-            val pm = packageManager
-            val installed = pm.getInstalledApplications(PackageManager.GET_META_DATA or PackageManager.MATCH_DISABLED_COMPONENTS)
-            allEntries = installed.mapNotNull { info ->
-                val pkg = info.packageName
-                if (pkg == packageName) return@mapNotNull null
-                val flags = info.flags
-                val system = flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-                val state = try { pm.getApplicationEnabledSetting(pkg) } catch (_: Exception) { PackageManager.COMPONENT_ENABLED_STATE_DEFAULT }
-                val disabled = state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED ||
-                    state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER ||
-                    state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED
-                val title = try { pm.getApplicationLabel(info).toString() } catch (_: Exception) { pkg }
-                AppEntry(info, title, pkg, system, disabled)
-            }.filter { entry ->
-                when (mode) {
-                    Mode.REMOVE -> true
-                    Mode.DISABLE -> entry.system && !entry.disabled && entry.info.enabled
-                    Mode.ENABLE -> entry.disabled
+        val generation = ++loadGeneration
+        subtitle.text = "טוען אפליקציות…"
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val pm = packageManager
+                    val installed = pm.getInstalledApplications(
+                        PackageManager.GET_META_DATA or PackageManager.MATCH_DISABLED_COMPONENTS
+                    )
+                    installed.mapNotNull { info ->
+                        val pkg = info.packageName
+                        if (pkg == packageName) return@mapNotNull null
+                        val system = info.flags and
+                            (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+                        val state = runCatching { pm.getApplicationEnabledSetting(pkg) }
+                            .getOrDefault(PackageManager.COMPONENT_ENABLED_STATE_DEFAULT)
+                        val disabled = state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED ||
+                            state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER ||
+                            state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED
+                        val title = runCatching { pm.getApplicationLabel(info).toString() }.getOrDefault(pkg)
+                        AppEntry(info, title, pkg, system, disabled)
+                    }.filter { entry ->
+                        when (mode) {
+                            Mode.REMOVE -> true
+                            Mode.DISABLE -> entry.system && !entry.disabled && entry.info.enabled
+                            Mode.ENABLE -> entry.disabled
+                        }
+                    }
                 }
             }
-            applyFilterAndSort()
-            if (entries.isEmpty()) subtitle.text = subtitle.text.toString() + "\nלא נמצאו אפליקציות ברשימה זו."
-        } catch (e: Exception) {
-            subtitle.text = "לא ניתן לקרוא את רשימת האפליקציות: " + e.message
+            if (generation != loadGeneration || isFinishing) return@launch
+            result.onSuccess { loaded ->
+                allEntries = loaded
+                applyFilterAndSort()
+                if (entries.isEmpty()) {
+                    subtitle.text = subtitle.text.toString() + "\nלא נמצאו אפליקציות ברשימה זו."
+                }
+            }.onFailure { error ->
+                allEntries = emptyList()
+                applyFilterAndSort()
+                subtitle.text = "לא ניתן לקרוא את רשימת האפליקציות: " +
+                    (error.message ?: "שגיאה לא ידועה")
+            }
         }
     }
 
@@ -238,7 +254,10 @@ class AppManagerActivity : AppCompatActivity() {
                         Mode.ENABLE -> "pm enable --user $userId ${entry.packageName}"
                     }
                     val result = adb.executeShell(command, 30)
-                    if (result.exitCode != 0) {
+                    if (result.exitCode != 0 ||
+                        result.output.contains("Failure", ignoreCase = true) ||
+                        result.output.contains("Unknown package", ignoreCase = true)
+                    ) {
                         throw IllegalStateException(result.output.ifBlank { "Android דחה את הפעולה." })
                     }
                     result.output.ifBlank { "הפעולה הסתיימה." }

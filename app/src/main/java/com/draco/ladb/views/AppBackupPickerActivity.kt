@@ -37,6 +37,9 @@ class AppBackupPickerActivity : AppCompatActivity() {
     private lateinit var count: TextView
     private var apps: List<AppBackupManager.AppItem> = emptyList()
     private var pendingPackage: String? = null
+    private var reloadGeneration = 0
+    private val searchHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val filterRunnable = Runnable { renderApps() }
 
     private val saveBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         val packageName = pendingPackage
@@ -53,9 +56,9 @@ class AppBackupPickerActivity : AppCompatActivity() {
         reloadApps()
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (::appList.isInitialized) reloadApps()
+    override fun onDestroy() {
+        searchHandler.removeCallbacksAndMessages(null)
+        super.onDestroy()
     }
 
     private fun buildScreen() {
@@ -108,7 +111,10 @@ class AppBackupPickerActivity : AppCompatActivity() {
         content.addView(search, LinearLayout.LayoutParams(-1, dp(49)))
         search.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = renderApps()
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                searchHandler.removeCallbacks(filterRunnable)
+                searchHandler.postDelayed(filterRunnable, 180L)
+            }
             override fun afterTextChanged(s: android.text.Editable?) {}
         })
 
@@ -141,12 +147,25 @@ class AppBackupPickerActivity : AppCompatActivity() {
 
     private fun reloadApps() {
         if (!::appList.isInitialized) return
-        apps = runCatching { AppBackupManager.loadApps(this, includeSystem.isChecked) }.getOrElse {
-            appList.removeAllViews()
-            appList.addView(text("לא ניתן לקרוא את רשימת האפליקציות: ${it.message}", 13, Color.RED, false))
-            return
+        val generation = ++reloadGeneration
+        val showSystem = includeSystem.isChecked
+        count.text = "טוען אפליקציות…"
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { AppBackupManager.loadApps(this@AppBackupPickerActivity, showSystem) }
+            }
+            if (generation != reloadGeneration || isFinishing) return@launch
+            result.onSuccess { apps = it }
+                .onFailure {
+                    apps = emptyList()
+                    appList.removeAllViews()
+                    appList.addView(text(
+                        "לא ניתן לקרוא את רשימת האפליקציות: " + (it.message ?: "שגיאה לא ידועה"),
+                        13, Color.RED, false
+                    ))
+                }
+            renderApps()
         }
-        renderApps()
     }
 
     private fun renderApps() {

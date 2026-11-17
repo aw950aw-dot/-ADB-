@@ -42,6 +42,9 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
 
     private val _viewModelHasStartedADB = MutableLiveData(false)
     val viewModelHasStartedADB: LiveData<Boolean> = _viewModelHasStartedADB
+    private val startLock = Any()
+    private var startInProgress = false
+    private val startCallbacks = mutableListOf<(Boolean) -> Unit>()
 
     init {
         startOutputThread()
@@ -49,17 +52,31 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
     }
 
 
-    fun startADBServer(callback: ((Boolean) -> (Unit))? = null) {
-        // Don't start if it's already started.
-        if (_viewModelHasStartedADB.value == true || adb.running.value == true) return
+    fun startADBServer(callback: ((Boolean) -> Unit)? = null) {
+        if (adb.running.value == true) {
+            _viewModelHasStartedADB.postValue(true)
+            callback?.invoke(true)
+            return
+        }
+        val shouldStart = synchronized(startLock) {
+            callback?.let { startCallbacks.add(it) }
+            if (startInProgress) false
+            else {
+                startInProgress = true
+                true
+            }
+        }
+        if (!shouldStart) return
 
         viewModelScope.launch(Dispatchers.IO) {
-            val success = adb.initServer()
-            if (success) {
-                startShellDeathThread()
-                _viewModelHasStartedADB.postValue(true)
+            val success = runCatching { adb.initServer() }.getOrDefault(false)
+            if (success) startShellDeathThread()
+            _viewModelHasStartedADB.postValue(success)
+            val callbacks = synchronized(startLock) {
+                startInProgress = false
+                startCallbacks.toList().also { startCallbacks.clear() }
             }
-            callback?.invoke(success)
+            callbacks.forEach { waiting -> runCatching { waiting(success) } }
         }
     }
 
