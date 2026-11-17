@@ -3,6 +3,10 @@ package com.draco.ladb.utils
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import java.io.IOException
+import java.net.InetSocketAddress
+import java.net.NetworkInterface
+import java.net.ServerSocket
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -33,7 +37,28 @@ class PairingPortDiscovery(context: Context) {
 
                         override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
                             val port = serviceInfo.port
-                            if (port in 1..65535) {
+                            if (port !in 1..65535) {
+                                resolving.set(false)
+                                return
+                            }
+                            // Ignore other phones/tablets that may advertise pairing on the same Wi-Fi.
+                            val belongsToThisDevice = runCatching {
+                                NetworkInterface.getNetworkInterfaces().asSequence().any { network ->
+                                    network.inetAddresses.asSequence().any { address ->
+                                        address.hostAddress == serviceInfo.host.hostAddress
+                                    }
+                                }
+                            }.getOrDefault(false)
+                            // The pairing daemon owns this local port; a successful bind means it is not ours.
+                            val portIsOccupiedLocally = try {
+                                ServerSocket().use {
+                                    it.bind(InetSocketAddress("127.0.0.1", port), 1)
+                                    false
+                                }
+                            } catch (_: IOException) {
+                                true
+                            }
+                            if (belongsToThisDevice && portIsOccupiedLocally) {
                                 foundPort.set(port)
                                 finished.countDown()
                             } else {
