@@ -12,15 +12,18 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.draco.ladb.utils.ADB
+import com.draco.ladb.utils.UiTheme
 
 /** Redesigned landing screen. Existing LADB tools remain available as separate destinations. */
 class DashboardActivity : AppCompatActivity() {
     private val adb by lazy { ADB.getInstance(this) }
+    private val palette get() = UiTheme.palette(this)
     private lateinit var connection: TextView
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        UiTheme.applySavedMode(this)
         super.onCreate(savedInstanceState)
         buildDashboard()
         adb.running.observe(this) { updateConnection(it == true) }
@@ -32,15 +35,15 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun buildDashboard() {
-        window.statusBarColor = Color.rgb(8, 14, 27)
-        window.navigationBarColor = Color.rgb(8, 14, 27)
-        window.decorView.systemUiVisibility = 0
+        window.statusBarColor = palette.statusBar
+        window.navigationBarColor = palette.navigationBar
+        window.decorView.systemUiVisibility = if (palette.dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
 
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             setPadding(dp(18), dp(18), dp(18), dp(24))
-            setBackgroundColor(Color.rgb(8, 14, 27))
+            setBackgroundColor(palette.background)
         }
         val scroll = ScrollView(this).apply { isFillViewport = true }
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -52,17 +55,17 @@ class DashboardActivity : AppCompatActivity() {
         }
         val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         brand.addView(text("ADB SMART  /  CONTROL", 10, Color.rgb(97, 199, 226), true))
-        brand.addView(text("מרכז שליטה לאנדרואיד", 23, Color.WHITE, true).apply {
+        brand.addView(text("מרכז שליטה לאנדרואיד", 23, palette.text, true).apply {
             setPadding(0, dp(3), 0, 0)
         })
         top.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        top.addView(actionButton("⚙", Color.rgb(26, 39, 60)) {
+        top.addView(actionButton("⚙", palette.surfaceAlt) {
             startActivity(Intent(this, SettingsActivity::class.java))
         }, LinearLayout.LayoutParams(dp(48), dp(48)))
         content.addView(top)
 
         val tagline = text("חיבור אלחוטי, גיבוי אפליקציות וכלי מערכת — במקום אחד.", 13,
-            Color.rgb(142, 161, 188), false)
+            palette.muted, false)
         tagline.setPadding(0, dp(7), 0, dp(16))
         content.addView(tagline)
 
@@ -74,11 +77,6 @@ class DashboardActivity : AppCompatActivity() {
                 intArrayOf(Color.rgb(31, 91, 145), Color.rgb(26, 62, 105), Color.rgb(23, 43, 75))
             ).apply { cornerRadius = dp(24).toFloat() }
         }
-        val pill = text("הפעולה המרכזית", 11, Color.rgb(179, 230, 255), true).apply {
-            setPadding(dp(10), dp(5), dp(10), dp(5))
-            background = rounded(Color.rgb(31, 104, 154), dp(18))
-        }
-        hero.addView(pill)
         hero.addView(text("גיבוי ושחזור\nאפליקציות ונתונים", 28, Color.WHITE, true).apply {
             setPadding(0, dp(10), 0, dp(6))
         })
@@ -98,14 +96,14 @@ class DashboardActivity : AppCompatActivity() {
         content.addView(connection, LinearLayout.LayoutParams(-1, -2).apply {
             topMargin = dp(13)
         })
-        content.addView(actionButton("התחברות / שיוך Wireless Debugging", Color.rgb(33, 55, 83)) {
-            startActivity(Intent(this, MainActivity::class.java))
+        content.addView(actionButton("התחברות / שיוך Wireless Debugging", palette.accent) {
+            startActivity(Intent(this, ConnectionActivity::class.java))
         }, LinearLayout.LayoutParams(-1, dp(47)).apply { topMargin = dp(8) })
 
         content.addView(sectionTitle("כלי ADB נוספים", "כל היכולות הקיימות נשארות זמינות"))
         val tools = listOf(
             Tool("ניהול אפליקציות", "הסרה, השבתה והפעלה", Color.rgb(46, 114, 167)) {
-                startActivity(Intent(this, AppManagerActivity::class.java).putExtra("mode", "remove"))
+                startActivity(Intent(this, AppManagerHubActivity::class.java))
             },
             Tool("פקודות מוכנות", "ספריית פקודות לפי קטגוריות", Color.rgb(42, 132, 122)) {
                 startActivity(Intent(this, PresetsActivity::class.java))
@@ -131,16 +129,16 @@ class DashboardActivity : AppCompatActivity() {
         val note = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(15), dp(14), dp(15), dp(14))
-            background = rounded(Color.rgb(16, 27, 43), dp(16), Color.rgb(34, 52, 75))
+            background = rounded(palette.surface, dp(16), palette.outline)
         }
-        note.addView(text("חשוב לגבי גיבוי נתונים פרטיים", 14, Color.rgb(225, 236, 249), true))
+        note.addView(text("חשוב לגבי גיבוי נתונים פרטיים", 14, palette.text, true))
         note.addView(text(
-            "ADB רגיל אינו עוקף את ארגז החול של Android. תיקיות פרטיות יועתקו רק עם Root, או עם run-as באפליקציה שמאפשרת זאת. בדוח הגיבוי יוצגו במדויק הנתונים שנכללו.",
-            12, Color.rgb(148, 166, 190), false
+            "ADB רגיל אינו עוקף את ארגז החול של Android. תיקיות פרטיות יועתקו רק עם הרשאת Root לאפליקציה, או עם run-as באפליקציה שמאפשרת זאת. בדוח הגיבוי יוצגו במדויק הנתונים שנכללו.",
+            12, palette.muted, false
         ).apply { setPadding(0, dp(6), 0, 0) })
         content.addView(note, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
 
-        content.addView(text("ADB SMART  •  Wireless tools", 10, Color.rgb(92, 112, 140), true).apply {
+        content.addView(text("ADB SMART  •  Wireless tools", 10, palette.muted, true).apply {
             gravity = Gravity.CENTER
             setPadding(0, dp(20), 0, 0)
         })
@@ -160,7 +158,7 @@ class DashboardActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(13), dp(13), dp(13), dp(13))
-            background = rounded(Color.rgb(18, 30, 48), dp(17), Color.rgb(40, 57, 81))
+            background = rounded(palette.surface, dp(17), palette.outline)
             isClickable = true
             isFocusable = true
             setOnClickListener { tool.action() }
@@ -168,10 +166,10 @@ class DashboardActivity : AppCompatActivity() {
         card.addView(View(this).apply {
             background = rounded(tool.color, dp(8))
         }, LinearLayout.LayoutParams(dp(28), dp(5)))
-        card.addView(text(tool.title, 15, Color.WHITE, true).apply {
+        card.addView(text(tool.title, 15, palette.text, true).apply {
             setPadding(0, dp(12), 0, dp(4))
         })
-        card.addView(text(tool.subtitle, 11, Color.rgb(145, 164, 190), false))
+        card.addView(text(tool.subtitle, 11, palette.muted, false))
         return card
     }
 
@@ -180,8 +178,8 @@ class DashboardActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(20), 0, dp(5))
         }
-        wrap.addView(text(title, 18, Color.WHITE, true))
-        wrap.addView(text(subtitle, 11, Color.rgb(133, 153, 179), false).apply {
+        wrap.addView(text(title, 18, palette.text, true))
+        wrap.addView(text(subtitle, 11, palette.muted, false).apply {
             setPadding(0, dp(3), 0, 0)
         })
         return wrap
@@ -193,7 +191,7 @@ class DashboardActivity : AppCompatActivity() {
             else "○  ADB ממתין לחיבור — פתח את מסך השיוך"
         connection.setTextColor(if (connected) Color.rgb(110, 231, 183) else Color.rgb(253, 186, 116))
         connection.background = rounded(
-            if (connected) Color.rgb(17, 49, 48) else Color.rgb(40, 34, 34), dp(14)
+            if (connected) Color.rgb(17, 49, 48) else palette.surfaceAlt, dp(14), palette.outline
         )
     }
 

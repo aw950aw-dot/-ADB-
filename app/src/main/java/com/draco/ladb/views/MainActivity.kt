@@ -20,6 +20,7 @@ import androidx.core.content.edit
 import com.draco.ladb.R
 import com.draco.ladb.utils.ApiKeyVault
 import com.draco.ladb.utils.AiProviderClient
+import com.draco.ladb.utils.UiTheme
 import com.draco.ladb.viewmodels.MainActivityViewModel
 import androidx.activity.viewModels
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,7 +35,8 @@ import java.io.OutputStreamWriter
 
 class MainActivity : AppCompatActivity() {
     private val vm: MainActivityViewModel by viewModels()
-    private val blue=Color.rgb(23,105,210)
+    private val palette get() = UiTheme.palette(this)
+    private val blue get() = palette.accent
     private lateinit var root: LinearLayout
     private lateinit var status: TextView
     private lateinit var connectionSpinner: ProgressBar
@@ -48,13 +50,13 @@ class MainActivity : AppCompatActivity() {
         if (!uris.isNullOrEmpty()) installSelectedApks(uris)
     }
     private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
-    private fun panel(): LinearLayout=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(14),dp(16),dp(14)); background=GradientDrawable().apply { setColor(Color.WHITE); cornerRadius=dp(18).toFloat(); setStroke(dp(1),Color.rgb(225,235,248)) } }
-    private fun label(s:String,size:Float=15f):TextView=TextView(this).apply { text=s; textSize=size; setTextColor(Color.rgb(25,48,78)); gravity=Gravity.RIGHT }
+    private fun panel(): LinearLayout=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(14),dp(16),dp(14)); background=GradientDrawable().apply { setColor(palette.surface); cornerRadius=dp(18).toFloat(); setStroke(dp(1),palette.outline) } }
+    private fun label(s:String,size:Float=15f):TextView=TextView(this).apply { text=s; textSize=size; setTextColor(palette.text); gravity=Gravity.RIGHT }
     private fun button(s:String, action:()->Unit)=Button(this).apply { text=s; isAllCaps=false; setOnClickListener { action() } }
     private fun addSpace(h:Int=10){ root.addView(Space(this).apply { minimumHeight=dp(h) }) }
-    override fun onCreate(savedInstanceState:Bundle?){ super.onCreate(savedInstanceState)
-        window.statusBarColor=Color.rgb(234,243,255); window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-        root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(16),dp(16),dp(22)); layoutDirection=View.LAYOUT_DIRECTION_RTL; setBackgroundColor(Color.rgb(244,248,255)) }
+    override fun onCreate(savedInstanceState:Bundle?){ UiTheme.applySavedMode(this); super.onCreate(savedInstanceState)
+        window.statusBarColor=palette.statusBar; window.navigationBarColor=palette.navigationBar; window.decorView.systemUiVisibility=if(palette.dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(16),dp(16),dp(22)); layoutDirection=View.LAYOUT_DIRECTION_RTL; setBackgroundColor(palette.background) }
         root.addView(LinearLayout(this).apply {
             orientation=LinearLayout.HORIZONTAL
             layoutDirection=View.LAYOUT_DIRECTION_RTL
@@ -155,10 +157,10 @@ class MainActivity : AppCompatActivity() {
                 textDirection=View.TEXT_DIRECTION_LTR
                 gravity=Gravity.LEFT or Gravity.TOP
                 typeface=Typeface.MONOSPACE
-                setTextColor(Color.rgb(225,239,255))
+                setTextColor(palette.text)
                 setPadding(dp(14),dp(14),dp(14),dp(14))
                 setLineSpacing(dp(3).toFloat(),1f)
-                background=GradientDrawable().apply { setColor(Color.rgb(19,31,49)); cornerRadius=dp(14).toFloat() }
+                background=GradientDrawable().apply { setColor(palette.surfaceAlt); cornerRadius=dp(14).toFloat() }
             }
             outputScroll=ScrollView(this@MainActivity).apply {
                 isFillViewport=false
@@ -457,9 +459,9 @@ class MainActivity : AppCompatActivity() {
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             setPadding(d(20), d(18), d(20), d(12))
             background = GradientDrawable().apply {
-                setColor(Color.WHITE)
+                setColor(palette.surface)
                 cornerRadius = d(18).toFloat()
-                setStroke(d(1), Color.rgb(220, 232, 248))
+                setStroke(d(1), palette.outline)
             }
         }
 

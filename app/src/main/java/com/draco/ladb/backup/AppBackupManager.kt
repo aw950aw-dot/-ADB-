@@ -6,6 +6,7 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import com.draco.ladb.utils.ADB
+import com.draco.ladb.utils.RootAccessManager
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
@@ -116,10 +117,7 @@ object AppBackupManager {
         }
 
         val userId = currentUserId(adb)
-        val rootAvailable = runCatching {
-            val result = adb.executeShell("su -c 'id'", 25)
-            result.exitCode == 0 && result.output.contains("uid=0")
-        }.getOrDefault(false)
+        val rootAvailable = runCatching { RootAccessManager.verifyAccess(context) }.getOrDefault(false)
 
         val work = File(context.cacheDir, "app-backup-work-${UUID.randomUUID()}").apply { mkdirs() }
         val payloads = mutableListOf<Payload>()
@@ -130,7 +128,7 @@ object AppBackupManager {
             val privateTar = File(work, "private-user.tar")
             val privatePayload = if (rootAvailable) {
                 val inner = "tar -C ${quote(privateBase)} -cpf - ${quote(packageName)}"
-                tryTar(adb, privateTar, "su -c ${quote(inner)}", "private_user", "ROOT", privatePath)
+                tryRootTar(privateTar, inner, "private_user", privatePath)
             } else {
                 val inner = "tar -C ${quote(privatePath)} -cpf - ."
                 tryTar(adb, privateTar, "run-as $packageName sh -c ${quote(inner)}",
@@ -147,10 +145,10 @@ object AppBackupManager {
                 val deviceBase = "/data/user_de/$userId"
                 val devicePath = "$deviceBase/$packageName"
                 val deviceTar = File(work, "private-device.tar")
-                tryTar(
-                    adb, deviceTar,
-                    "su -c ${quote("tar -C ${quote(deviceBase)} -cpf - ${quote(packageName)}")}",
-                    "private_device", "ROOT", devicePath
+                tryRootTar(
+                    deviceTar,
+                    "tar -C ${quote(deviceBase)} -cpf - ${quote(packageName)}",
+                    "private_device", devicePath
                 )?.let { payloads += it }
             }
 
@@ -169,10 +167,8 @@ object AppBackupManager {
                     payloads += first
                 } else if (rootAvailable) {
                     val rootTar = File(work, "root-$name")
-                    tryTar(adb, rootTar,
-                        "su -c ${quote("if [ -d ${quote(path)} ]; then $plain; else exit 44; fi")}",
-                        type, "ROOT", path
-                    )?.let { payloads += it }
+                    tryRootTar(rootTar, "if [ -d ${quote(path)} ]; then $plain; else exit 44; fi",
+                        type, path)?.let { payloads += it }
                 }
             }
 
@@ -259,10 +255,7 @@ object AppBackupManager {
             val userId = currentUserId(adb)
             val appUid = installed.applicationInfo?.uid
                 ?: error("לא ניתן לזהות UID של האפליקציה במכשיר היעד.")
-            val rootAvailable = runCatching {
-                val result = adb.executeShell("su -c 'id'", 25)
-                result.exitCode == 0 && result.output.contains("uid=0")
-            }.getOrDefault(false)
+            val rootAvailable = runCatching { RootAccessManager.verifyAccess(context) }.getOrDefault(false)
 
             runCatching { adb.executeShell("am force-stop ${backup.packageName}", 15) }
             val restored = mutableListOf<String>()
@@ -277,7 +270,7 @@ object AppBackupManager {
                             val target = "$base/$pkg"
                             val inner = "mkdir -p ${quote(base)} && tar -xpf - -C ${quote(base)} && " +
                                 "chown -R $appUid:$appUid ${quote(target)} && restorecon -RF ${quote(target)}"
-                            runCatching { adb.execInFile(payload.file, "su -c ${quote(inner)}", 600).exitCode == 0 }.getOrDefault(false)
+                            runCatching { RootAccessManager.execInFile(payload.file, inner, 600); true }.getOrDefault(false)
                         } else if (payload.method == "RUN_AS") {
                             val target = "/data/user/$userId/$pkg"
                             val inner = "tar -xpf - -C ${quote(target)}"
@@ -290,7 +283,7 @@ object AppBackupManager {
                             val target = "$base/$pkg"
                             val inner = "mkdir -p ${quote(base)} && tar -xpf - -C ${quote(base)} && " +
                                 "chown -R $appUid:$appUid ${quote(target)} && restorecon -RF ${quote(target)}"
-                            runCatching { adb.execInFile(payload.file, "su -c ${quote(inner)}", 600).exitCode == 0 }.getOrDefault(false)
+                            runCatching { RootAccessManager.execInFile(payload.file, inner, 600); true }.getOrDefault(false)
                         } else false
                     }
                     "external_data", "external_media", "obb" -> {
@@ -300,12 +293,11 @@ object AppBackupManager {
                             else -> "/sdcard/Android/obb"
                         }
                         val inner = "mkdir -p ${quote(base)} && tar -xpf - -C ${quote(base)}"
-                        val restoreCommand = if (payload.method == "ROOT" && rootAvailable) {
-                            "su -c ${quote(inner)}"
+                        if (payload.method == "ROOT" && rootAvailable) {
+                            runCatching { RootAccessManager.execInFile(payload.file, inner, 600); true }.getOrDefault(false)
                         } else {
-                            "sh -c ${quote(inner)}"
+                            runCatching { adb.execInFile(payload.file, "sh -c ${quote(inner)}", 600).exitCode == 0 }.getOrDefault(false)
                         }
-                        runCatching { adb.execInFile(payload.file, restoreCommand, 600).exitCode == 0 }.getOrDefault(false)
                     }
                     else -> false
                 }
@@ -333,6 +325,22 @@ object AppBackupManager {
             return result
         } finally {
             backup.directory.deleteRecursively()
+        }
+    }
+
+    private fun tryRootTar(
+        file: File,
+        command: String,
+        type: String,
+        sourcePath: String
+    ): Payload? {
+        return try {
+            RootAccessManager.execOutToFile(command, file, 600)
+            validateTarArchive(file)
+            Payload("data/$type.tar", file, type, "ROOT", sourcePath)
+        } catch (_: Exception) {
+            file.delete()
+            null
         }
     }
 

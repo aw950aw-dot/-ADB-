@@ -17,7 +17,7 @@ import java.util.Locale
 
 class PresetsActivity : Activity() {
     private data class Preset(val category: String, val title: String, val command: String)
-    private val blue = Color.rgb(23, 105, 210)
+    private val blue = palette.accent
     private lateinit var listContainer: LinearLayout
     private lateinit var search: EditText
     private val presets = listOf(
@@ -76,35 +76,37 @@ class PresetsActivity : Activity() {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(14), dp(11), dp(14), dp(11))
         background = GradientDrawable().apply {
-            setColor(Color.WHITE)
+            setColor(palette.surface)
             cornerRadius = dp(14).toFloat()
-            setStroke(dp(1), Color.rgb(225, 235, 248))
+            setStroke(dp(1), palette.outline)
         }
         isClickable = true
         isFocusable = true
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        UiTheme.applySavedMode(this)
         super.onCreate(savedInstanceState)
-        window.statusBarColor = Color.rgb(234, 243, 255)
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        window.statusBarColor = palette.statusBar
+        window.navigationBarColor = palette.navigationBar
+        window.decorView.systemUiVisibility = if (palette.dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             setPadding(dp(16), dp(16), dp(16), dp(16))
-            setBackgroundColor(Color.rgb(244, 248, 255))
+            setBackgroundColor(palette.background)
         }
         root.addView(TextView(this).apply {
             text = "פקודות מוכנות"
             textSize = 25f
-            setTextColor(Color.rgb(20, 45, 80))
+            setTextColor(palette.text)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.RIGHT
         })
         root.addView(TextView(this).apply {
             text = "בחר פקודה כדי לשלוח אותה למסוף ADB"
             textSize = 13f
-            setTextColor(Color.rgb(85, 105, 130))
+            setTextColor(palette.muted)
             gravity = Gravity.RIGHT
             setPadding(0, dp(4), 0, dp(10))
         })
@@ -114,9 +116,9 @@ class PresetsActivity : Activity() {
             gravity = Gravity.RIGHT
             setPadding(dp(12), dp(8), dp(12), dp(8))
             background = GradientDrawable().apply {
-                setColor(Color.WHITE)
+                setColor(palette.inputBackground)
                 cornerRadius = dp(12).toFloat()
-                setStroke(dp(1), Color.rgb(220, 230, 243))
+                setStroke(dp(1), palette.outline)
             }
         }
         root.addView(search, LinearLayout.LayoutParams(-1, dp(52)))
@@ -157,7 +159,7 @@ class PresetsActivity : Activity() {
                     text = preset.category
                     textSize = 16f
                     typeface = Typeface.DEFAULT_BOLD
-                    setTextColor(Color.rgb(23, 105, 210))
+                    setTextColor(palette.accent)
                     gravity = Gravity.RIGHT
                     setPadding(0, dp(14), 0, dp(6))
                 })
@@ -167,13 +169,13 @@ class PresetsActivity : Activity() {
                     text = preset.title
                     textSize = 15f
                     typeface = Typeface.DEFAULT_BOLD
-                    setTextColor(Color.rgb(30, 55, 85))
+                    setTextColor(palette.text)
                     gravity = Gravity.RIGHT
                 })
                 addView(TextView(this@PresetsActivity).apply {
                     text = preset.command
                     textSize = 11f
-                    setTextColor(Color.rgb(95, 115, 140))
+                    setTextColor(palette.muted)
                     gravity = Gravity.LEFT
                     textDirection = View.TEXT_DIRECTION_LTR
                     setPadding(0, dp(4), 0, 0)
@@ -193,7 +195,7 @@ class PresetsActivity : Activity() {
                 text = "לא נמצאו פקודות מתאימות."
                 gravity = Gravity.CENTER
                 setPadding(0, dp(24), 0, dp(24))
-                setTextColor(Color.GRAY)
+                setTextColor(palette.muted)
             })
         }
     }

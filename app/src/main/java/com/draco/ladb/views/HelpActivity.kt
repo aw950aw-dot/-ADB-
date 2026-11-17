@@ -9,6 +9,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updateLayoutParams
 import com.draco.ladb.R
+import com.draco.ladb.utils.UiTheme
 import com.draco.ladb.databinding.ActivityHelpBinding
 import com.draco.ladb.fragments.HelpPreferenceFragment
 
@@ -17,6 +18,7 @@ class HelpActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
+        UiTheme.applySavedMode(this)
         super.onCreate(savedInstanceState)
         binding = ActivityHelpBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -41,7 +43,7 @@ class HelpActivity : AppCompatActivity() {
         }
         supportActionBar!!.elevation = 0f
         WindowCompat.getInsetsController(window, window.decorView)
-            .isAppearanceLightStatusBars = false
+            .isAppearanceLightStatusBars = !UiTheme.isDark(this)
 
         supportFragmentManager
             .beginTransaction()

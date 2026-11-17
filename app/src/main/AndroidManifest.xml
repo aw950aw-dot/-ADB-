@@ -11,6 +11,9 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <application android:banner="@drawable/banner" android:icon="@mipmap/ic_launcher" android:label="@string/app_name" android:roundIcon="@mipmap/ic_launcher_round" android:supportsRtl="true" android:theme="@style/Theme.LADB">
+        <activity android:name=".views.ConnectionActivity" android:exported="false" android:label="חיבור Wireless Debugging"/>
+        <activity android:name=".views.AppBackupPickerActivity" android:exported="false" android:label="בחר אפליקציה לגיבוי"/>
+        <activity android:name=".views.AppManagerHubActivity" android:exported="false" android:label="ניהול אפליקציות"/>
         <activity android:name=".views.AppTransferActivity" android:exported="false" android:label="גיבוי ושחזור אפליקציות"/>
         <activity android:name=".views.DashboardActivity" android:exported="true" android:label="@string/app_name">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/><category android:name="android.intent.category.LEANBACK_LAUNCHER"/></intent-filter>

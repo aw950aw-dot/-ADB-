@@ -23,6 +23,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.draco.ladb.utils.ADB
+import com.draco.ladb.utils.UiTheme
 import java.util.Locale
 
 class AppManagerActivity : AppCompatActivity() {
@@ -35,7 +36,8 @@ class AppManagerActivity : AppCompatActivity() {
         val disabled: Boolean
     )
 
-    private val blue = Color.rgb(23, 105, 210)
+    private val palette get() = UiTheme.palette(this)
+    private val blue get() = palette.accent
     private val adb by lazy { ADB.getInstance(this) }
     private lateinit var mode: Mode
     private lateinit var list: ListView
@@ -48,20 +50,22 @@ class AppManagerActivity : AppCompatActivity() {
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        UiTheme.applySavedMode(this)
         super.onCreate(savedInstanceState)
         mode = when (intent.getStringExtra("mode")) {
             "disable" -> Mode.DISABLE
             "enable" -> Mode.ENABLE
             else -> Mode.REMOVE
         }
-        window.statusBarColor = Color.rgb(234, 243, 255)
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        window.statusBarColor = palette.statusBar
+        window.navigationBarColor = palette.navigationBar
+        window.decorView.systemUiVisibility = if (palette.dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             setPadding(dp(16), dp(16), dp(16), dp(12))
-            setBackgroundColor(Color.rgb(244, 248, 255))
+            setBackgroundColor(palette.background)
         }
         val title = when (mode) {
             Mode.REMOVE -> "הסרת אפליקציות"
@@ -71,13 +75,13 @@ class AppManagerActivity : AppCompatActivity() {
         root.addView(TextView(this).apply {
             text = title
             textSize = 24f
-            setTextColor(Color.rgb(20, 45, 80))
+            setTextColor(palette.text)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.RIGHT
         })
         subtitle = TextView(this).apply {
             textSize = 13f
-            setTextColor(Color.rgb(85, 105, 130))
+            setTextColor(palette.muted)
             gravity = Gravity.RIGHT
             setPadding(0, dp(6), 0, dp(12))
             text = when (mode) {
@@ -93,9 +97,9 @@ class AppManagerActivity : AppCompatActivity() {
             textDirection = View.TEXT_DIRECTION_RTL
             setPadding(dp(12), dp(8), dp(12), dp(8))
             background = GradientDrawable().apply {
-                setColor(Color.WHITE)
+                setColor(palette.surface)
                 cornerRadius = dp(12).toFloat()
-                setStroke(dp(1), Color.rgb(220, 230, 243))
+                setStroke(dp(1), palette.outline)
             }
         }
         root.addView(searchInput, LinearLayout.LayoutParams(-1, dp(52)).apply { bottomMargin = dp(8) })
@@ -115,7 +119,7 @@ class AppManagerActivity : AppCompatActivity() {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) { applyFilterAndSort() }
         }
         list = ListView(this).apply {
-            divider = android.graphics.drawable.ColorDrawable(Color.rgb(220, 230, 243))
+            divider = android.graphics.drawable.ColorDrawable(palette.outline)
             dividerHeight = dp(1)
             cacheColorHint = Color.TRANSPARENT
             isFastScrollEnabled = true
@@ -246,7 +250,7 @@ class AppManagerActivity : AppCompatActivity() {
             textColumn.addView(TextView(this@AppManagerActivity).apply {
                 text = entry.title
                 textSize = 15f
-                setTextColor(Color.rgb(25, 48, 78))
+                setTextColor(palette.text)
                 typeface = Typeface.DEFAULT_BOLD
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
@@ -254,7 +258,7 @@ class AppManagerActivity : AppCompatActivity() {
             textColumn.addView(TextView(this@AppManagerActivity).apply {
                 text = entry.packageName
                 textSize = 11f
-                setTextColor(Color.rgb(105, 120, 140))
+                setTextColor(palette.muted)
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
             })

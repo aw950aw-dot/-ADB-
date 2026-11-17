@@ -47,7 +47,7 @@ class BookmarksActivity : AppCompatActivity() {
         }
         supportActionBar!!.elevation = 0f
         WindowCompat.getInsetsController(window, window.decorView)
-            .isAppearanceLightStatusBars = false
+            .isAppearanceLightStatusBars = !UiTheme.isDark(this)
 
         initialText = intent.getStringExtra(Intent.EXTRA_TEXT) ?: ""
 

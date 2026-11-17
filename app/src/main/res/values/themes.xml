@@ -1,4 +1,14 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-<style name="Theme.LADB" parent="Theme.MaterialComponents.Light.NoActionBar">
-<item name="colorPrimary">#1769D2</item><item name="colorPrimaryVariant">#0D47A1</item><item name="colorSecondary">#42A5F5</item><item name="android:statusBarColor">#EAF3FF</item><item name="android:windowLightStatusBar">true</item><item name="android:navigationBarColor">#FFFFFF</item><item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item><item name="android:fontFamily">sans</item><item name="fontFamily">sans</item><item name="android:windowBackground">#F4F8FF</item>
-</style></resources>
+    <style name="Theme.LADB" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#1769D2</item>
+        <item name="colorPrimaryVariant">#0D47A1</item>
+        <item name="colorSecondary">#21A99A</item>
+        <item name="android:statusBarColor">#F5F8FD</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">#FFFFFF</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="fontFamily">sans</item>
+        <item name="android:windowBackground">#F5F8FD</item>
+    </style>
+</resources>
