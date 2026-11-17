@@ -52,6 +52,9 @@ class AppManagerActivity : AppCompatActivity() {
     private lateinit var sortSpinner: Spinner
     private var loadGeneration = 0
     private var actionInProgress = false
+    private val searchHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val filterRunnable = Runnable { applyFilterAndSort() }
+    private val iconCache = object : android.util.LruCache<String, android.graphics.drawable.Drawable>(72) {}
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -116,7 +119,10 @@ class AppManagerActivity : AppCompatActivity() {
         root.addView(sortSpinner, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(8) })
         searchInput.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { applyFilterAndSort() }
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                searchHandler.removeCallbacks(filterRunnable)
+                searchHandler.postDelayed(filterRunnable, 160L)
+            }
             override fun afterTextChanged(s: android.text.Editable?) {}
         })
         sortSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
@@ -131,11 +137,9 @@ class AppManagerActivity : AppCompatActivity() {
             adapter = AppAdapter()
         }
         root.addView(list, LinearLayout.LayoutParams(-1, 0, 1f))
-        val close = android.widget.Button(this).apply {
-            text = "חזרה"
-            isAllCaps = false
-            setOnClickListener { finish() }
-        }
+        val close = UiComponents.button(
+            this, "חזרה", palette.surfaceAlt, palette.text, palette.outline, 48, 1
+        ) { finish() }
         root.addView(close, LinearLayout.LayoutParams(-1, dp(50)))
         setContentView(root)
         UiComponents.applySystemBars(this, root, palette)
@@ -144,6 +148,11 @@ class AppManagerActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         loadApps()
+    }
+
+    override fun onDestroy() {
+        searchHandler.removeCallbacksAndMessages(null)
+        super.onDestroy()
     }
 
     private fun loadApps() {
@@ -223,7 +232,7 @@ class AppManagerActivity : AppCompatActivity() {
             Mode.ENABLE -> "להחזיר לפעולה את ${entry.title}?"
         }
         val detail = when (mode) {
-            Mode.REMOVE -> "הפעולה משתמשת ב־pm uninstall --user 0. היא מסירה את האפליקציה מהמשתמש הנוכחי ואינה מוחקת קובצי מערכת מהמחיצה. באפליקציות מערכת ייתכן שההסרה לא תתאפשר."
+            Mode.REMOVE -> "הפעולה מסירה את האפליקציה מהמשתמש הפעיל בלבד ואינה מוחקת את קובצי המערכת. באפליקציות מערכת ייתכן שההסרה לא תתאפשר."
             Mode.DISABLE -> "השבתת רכיבי מערכת חיוניים עלולה לגרום לתקלות במכשיר. אל תשבית את משגר הבית, System UI, הגדרות, טלפון או רכיבי מערכת שאינך מזהה."
             Mode.ENABLE -> "האפליקציה תופעל מחדש באמצעות מנהל החבילות של Android."
         }
@@ -299,7 +308,10 @@ class AppManagerActivity : AppCompatActivity() {
             row.removeAllViews()
             val icon = ImageView(this@AppManagerActivity).apply {
                 scaleType = ImageView.ScaleType.FIT_CENTER
-                setImageDrawable(try { packageManager.getApplicationIcon(entry.info) } catch (_: Exception) { null })
+                val cached = iconCache.get(entry.packageName) ?: runCatching {
+                    packageManager.getApplicationIcon(entry.info)
+                }.getOrNull()?.also { iconCache.put(entry.packageName, it) }
+                setImageDrawable(cached ?: getDrawable(android.R.drawable.sym_def_app_icon))
             }
             row.addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(12) })
             val textColumn = LinearLayout(this@AppManagerActivity).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL }
