@@ -15,46 +15,50 @@ import androidx.core.content.ContextCompat
 import com.draco.ladb.R
 import com.draco.ladb.views.ConnectionActivity
 
-/** Inline notification reply for entering the Wireless Debugging pairing code. */
+/** Inline Wireless Debugging pairing reply. The reply is handled by a receiver, never by opening the app. */
 object PairingNotification {
     const val INPUT_KEY = "wireless_pairing_code"
     const val ACTION_PAIR = "com.aw950aw.adbsmart.ACTION_PAIR_FROM_NOTIFICATION"
-    private const val CHANNEL_ID = "wireless_debugging_pairing"
+    private const val CHANNEL_ID = "wireless_debugging_pairing_v2"
     private const val NOTIFICATION_ID = 4106
 
-    fun show(context: Context) {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) return
+    private fun allowed(context: Context): Boolean =
+        Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
+    private fun ensureChannel(context: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "שיוך Wireless Debugging",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "הזנת קוד השיוך של Android מתוך ההתראה"
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 250, 120, 250)
+            }
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun openAppIntent(context: Context): PendingIntent {
+        val intent = Intent(context, ConnectionActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        return PendingIntent.getActivity(
+            context, NOTIFICATION_ID + 1, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    fun show(context: Context, statusText: String = "הקלד את קוד 6 הספרות ולחץ „אישור אוטומטי”") {
+        if (!allowed(context)) return
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                val channel = NotificationChannel(
-                    CHANNEL_ID,
-                    "שיוך Wireless Debugging",
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply {
-                    description = "הזנת קוד השיוך של Android מתוך ההתראה"
-                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
-                }
-                manager.createNotificationChannel(channel)
-            }
-
-            val openIntent = Intent(context, ConnectionActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            }
-            val openPendingIntent = PendingIntent.getActivity(
-                context, NOTIFICATION_ID + 1, openIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            val replyIntent = Intent(context, ConnectionActivity::class.java).apply {
-                action = ACTION_PAIR
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            }
-            // RemoteInput requires a mutable PendingIntent so Android can attach the typed reply.
-            val replyPendingIntent = PendingIntent.getActivity(
+            ensureChannel(context)
+            val replyIntent = Intent(context, PairingReplyReceiver::class.java).apply { action = ACTION_PAIR }
+            val replyPendingIntent = PendingIntent.getBroadcast(
                 context, NOTIFICATION_ID, replyIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
             )
@@ -72,20 +76,40 @@ object PairingNotification {
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_baseline_adb_24)
                 .setContentTitle("שיוך Wireless Debugging")
-                .setContentText("הקלד את קוד 6 הספרות ולחץ „אישור אוטומטי”")
-                .setContentIntent(openPendingIntent)
+                .setContentText(statusText)
+                .setContentIntent(openAppIntent(context))
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_SERVICE)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .setAutoCancel(false)
-                .setOngoing(false)
+                .setOngoing(true)
+                .setOnlyAlertOnce(false)
                 .addAction(action)
                 .build()
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
-        } catch (_: SecurityException) {
-            // The app still provides a manual code field when notifications are disabled.
         } catch (_: Exception) {
-            // Notification problems must not block the pairing screen.
+            // The manual code and port fields remain available if notifications are blocked.
+        }
+    }
+
+    fun showResult(context: Context, success: Boolean, message: String) {
+        if (!allowed(context)) return
+        try {
+            ensureChannel(context)
+            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_baseline_adb_24)
+                .setContentTitle(if (success) "שיוך Wireless Debugging הצליח" else "שיוך Wireless Debugging נכשל")
+                .setContentText(message)
+                .setContentIntent(openAppIntent(context))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setAutoCancel(false)
+                .setOnlyAlertOnce(false)
+                .build()
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+        } catch (_: Exception) {
+            // Do not interrupt the system Settings screen.
         }
     }
 

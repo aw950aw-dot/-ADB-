@@ -1,10 +1,15 @@
 package com.draco.ladb.views
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.text.InputFilter
 import android.view.Gravity
@@ -15,6 +20,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.RemoteInput
 import androidx.lifecycle.lifecycleScope
 import androidx.activity.viewModels
@@ -32,9 +38,15 @@ class ConnectionActivity : AppCompatActivity() {
     private val palette get() = UiTheme.palette(this)
     private lateinit var status: TextView
     private lateinit var code: EditText
+    private lateinit var port: EditText
     private lateinit var pairPanel: LinearLayout
     private lateinit var pairButton: TextView
     private var pairing = false
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) PairingNotification.show(this)
+            else Toast.makeText(this, "כדי להשתמש באישור מתוך ההתראה יש לאפשר התראות ל־ADB SMART.", Toast.LENGTH_LONG).show()
+        }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
@@ -65,12 +77,27 @@ class ConnectionActivity : AppCompatActivity() {
         } else if (vm.needsToPair()) {
             pairPanel.visibility = View.VISIBLE
             status.text = "נדרש שיוך ראשוני — אפשר להזין את הקוד בהתראה שמופיעה למעלה"
-            PairingNotification.show(this)
+            showPairingNotification()
+        } else if (getSharedPreferences("pairing_state", MODE_PRIVATE).getBoolean("connect_when_resumed", false)) {
+            pairPanel.visibility = View.GONE
+            status.text = "השיוך הושלם מההתראה. חוזר לחיבור…"
         } else {
             pairPanel.visibility = View.GONE
             startConnection()
         }
         handlePairingReply(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val pairingState = getSharedPreferences("pairing_state", MODE_PRIVATE)
+        if (pairingState.getBoolean("connect_when_resumed", false) && !pairing) {
+            pairingState.edit().remove("connect_when_resumed").apply()
+            pairPanel.visibility = View.GONE
+            PairingNotification.cancel(this)
+            status.text = "השיוך הושלם. מתחבר ל־ADB…"
+            startConnection()
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -88,7 +115,7 @@ class ConnectionActivity : AppCompatActivity() {
             .orEmpty()
         if (reply.isNotBlank()) {
             code.setText(reply)
-            pairWithCode(reply)
+            pairWithCode(reply, port.text.toString().trim())
         }
     }
 
@@ -152,8 +179,11 @@ class ConnectionActivity : AppCompatActivity() {
         code = inputField("קוד שיוך בן 6 ספרות", android.text.InputType.TYPE_CLASS_NUMBER)
         code.filters = arrayOf(InputFilter.LengthFilter(6))
         pairPanel.addView(code, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(10) })
+        port = inputField("פורט שיוך (אופציונלי — לגיבוי ידני)", android.text.InputType.TYPE_CLASS_NUMBER)
+        port.filters = arrayOf(InputFilter.LengthFilter(5))
+        pairPanel.addView(port, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(9) })
         pairPanel.addView(text(
-            "הזנה ידנית מיועדת למקרה שהרשאת ההתראות לא אושרה או שההתראה לא מופיעה.",
+            "אפשר להשאיר את הפורט ריק לגילוי אוטומטי, או להזין אותו ידנית אם הגילוי האוטומטי נכשל.",
             11, palette.muted, false
         ).apply { setPadding(0, dp(8), 0, 0) })
         content.addView(pairPanel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(13) })
@@ -162,36 +192,58 @@ class ConnectionActivity : AppCompatActivity() {
         content.addView(pairButton, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(13) })
 
         content.addView(actionButton("פתח הגדרות מפתחים / Wireless Debugging", palette.surfaceAlt, palette.text) {
-            try {
-                startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
-            } catch (_: Exception) {
-                Toast.makeText(this, "לא ניתן לפתוח את הגדרות המפתחים במכשיר הזה.", Toast.LENGTH_LONG).show()
-            }
+            openDeveloperSettings()
         }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(9) })
 
         content.addView(actionButton("הצג שוב את התראת השיוך", palette.surfaceAlt, palette.text) {
             pairPanel.visibility = View.VISIBLE
-            PairingNotification.show(this)
+            showPairingNotification()
         }, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(8) })
 
         page.addView(scroll, LinearLayout.LayoutParams(-1, -1))
         setContentView(page)
     }
 
+
+    private fun showPairingNotification() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            PairingNotification.show(this)
+        }
+    }
+
+    private fun openDeveloperSettings() {
+        showPairingNotification()
+        try {
+            val settingsIntent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK
+            }
+            startActivity(settingsIntent)
+            Handler(Looper.getMainLooper()).postDelayed({
+                PairingNotification.show(this)
+            }, 900L)
+        } catch (_: Exception) {
+            Toast.makeText(this, "לא ניתן לפתוח את הגדרות המפתחים במכשיר הזה.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun connectOrPair() {
         if (pairing || vm.adb.running.value == true) return
         if (pairPanel.visibility == View.VISIBLE || vm.needsToPair()) {
-            pairWithCode(code.text.toString().trim())
+            pairWithCode(code.text.toString().trim(), port.text.toString().trim())
         } else {
             startConnection()
         }
     }
 
-    private fun pairWithCode(pairingCode: String) {
+    private fun pairWithCode(pairingCode: String, manualPort: String = port.text.toString().trim()) {
         if (pairing || vm.adb.running.value == true) return
         if (pairingCode.length != 6 || pairingCode.any { !it.isDigit() }) {
             Toast.makeText(this, "יש להזין קוד שיוך בן 6 ספרות.", Toast.LENGTH_LONG).show()
-            PairingNotification.show(this)
+            showPairingNotification()
             return
         }
         pairing = true
@@ -202,8 +254,13 @@ class ConnectionActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val pairingPort = PairingPortDiscovery(this@ConnectionActivity).findPairingPort()
-                        ?: error("לא נמצא פורט שיוך. ודא שחלון „שיוך באמצעות קוד” עדיין פתוח ונסה שוב.")
+                    val pairingPort = if (manualPort.isNotBlank()) {
+                        manualPort.toIntOrNull()?.takeIf { it in 1..65535 }
+                            ?: error("הפורט חייב להיות מספר בין 1 ל־65535.")
+                    } else {
+                        PairingPortDiscovery(this@ConnectionActivity).findPairingPort()
+                            ?: error("לא נמצא פורט שיוך. ודא שחלון „שיוך באמצעות קוד” עדיין פתוח, או הזן את הפורט ידנית.")
+                    }
                     if (!vm.adb.pair(pairingPort.toString(), pairingCode)) {
                         error("השיוך נכשל. ודא שהקוד עדיין בתוקף ונסה שוב.")
                     }
@@ -221,7 +278,7 @@ class ConnectionActivity : AppCompatActivity() {
                 pairButton.isEnabled = true
                 pairButton.text = "נסה שוב"
                 status.text = result.exceptionOrNull()?.message ?: "השיוך נכשל."
-                PairingNotification.show(this@ConnectionActivity)
+                showPairingNotification()
                 Toast.makeText(this@ConnectionActivity, status.text, Toast.LENGTH_LONG).show()
             }
         }

@@ -330,6 +330,23 @@ class SettingsActivity : AppCompatActivity() {
             })
         })
 
+        root.addView(heading("גיבוי נתוני ADB SMART"))
+        root.addView(card().apply {
+            addView(TextView(this@SettingsActivity).apply {
+                text = "גיבוי מוצפן של ההגדרות, מפתחות ה־API, הקבצים ומסדי הנתונים. אפשר לשחזר אחרי התקנה מחדש באמצעות הסיסמה שבחרת."
+                textSize = 12f
+                setTextColor(palette.muted)
+                gravity = Gravity.RIGHT
+            })
+            addView(Button(this@SettingsActivity).apply {
+                text = "פתח גיבוי ושחזור נתוני האפליקציה"
+                isAllCaps = false
+                setOnClickListener {
+                    startActivity(Intent(this@SettingsActivity, AppDataBackupActivity::class.java))
+                }
+            })
+        })
+
         root.addView(heading("אודות"))
         root.addView(card().apply {
             addView(TextView(this@SettingsActivity).apply {

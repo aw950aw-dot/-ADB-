@@ -94,14 +94,16 @@ class MainActivity : AppCompatActivity() {
             )
             rows.chunked(2).forEachIndexed { rowIndex, pair ->
                 addView(LinearLayout(this@MainActivity).apply {
-                    orientation=LinearLayout.HORIZONTAL
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    layoutDirection = View.LAYOUT_DIRECTION.RTL
                     pair.forEachIndexed { index, entry ->
                         val color = listOf(Color.rgb(28,125,205),Color.rgb(20,150,135),Color.rgb(109,89,190),Color.rgb(210,126,37))[(rowIndex*2+index)%4]
                         addView(tile(entry.first,color,entry.second),
-                            LinearLayout.LayoutParams(0,dp(74),1f).apply { setMargins(dp(3),dp(3),dp(3),dp(3)) })
+                            LinearLayout.LayoutParams(0,dp(80),1f).apply { setMargins(dp(4),dp(3),dp(4),dp(3)) })
                     }
-                    if(pair.size==1) addView(Space(this@MainActivity),LinearLayout.LayoutParams(0,dp(78),1f))
-                })
+                    if(pair.size==1) addView(Space(this@MainActivity),LinearLayout.LayoutParams(0,dp(80),1f))
+                }, LinearLayout.LayoutParams(-1, dp(86)))
             }
             addView(label("הסרה של אפליקציות מערכת היא למשתמש הנוכחי בלבד; לא ניתן למחוק את קובץ המערכת עצמו.",11f))
         })
@@ -251,6 +253,7 @@ class MainActivity : AppCompatActivity() {
         text=title
         textSize=14f
         maxLines=2
+        ellipsize = android.text.TextUtils.TruncateAt.END
         includeFontPadding=false
         typeface=Typeface.DEFAULT_BOLD
         gravity=Gravity.CENTER
