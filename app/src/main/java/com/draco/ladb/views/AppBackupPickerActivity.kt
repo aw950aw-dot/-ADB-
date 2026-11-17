@@ -11,12 +11,12 @@ import android.view.View
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.content.res.AppCompatResources
 import androidx.lifecycle.lifecycleScope
 import com.draco.ladb.backup.AppBackupManager
 import com.draco.ladb.utils.ADB
@@ -33,7 +33,7 @@ class AppBackupPickerActivity : AppCompatActivity() {
     private val palette get() = UiTheme.palette(this)
     private lateinit var appList: android.widget.ListView
     private lateinit var search: EditText
-    private lateinit var includeSystem: Switch
+    private lateinit var includeSystem: androidx.appcompat.widget.SwitchCompat
     private lateinit var count: TextView
     private var apps: List<AppBackupManager.AppItem> = emptyList()
     private var filteredApps: List<AppBackupManager.AppItem> = emptyList()
@@ -96,7 +96,7 @@ class AppBackupPickerActivity : AppCompatActivity() {
             hint = "חיפוש לפי שם או מזהה חבילה"
             textSize = 14f
             setSingleLine(true)
-            gravity = Gravity.CENTER_VERTICAL or Gravity.RIGHT
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
             setTextColor(palette.text)
             setHintTextColor(palette.muted)
             setPadding(dp(14), 0, dp(14), 0)
@@ -119,7 +119,7 @@ class AppBackupPickerActivity : AppCompatActivity() {
         }
         count = text("טוען אפליקציות…", 12, palette.muted, false)
         filters.addView(count, LinearLayout.LayoutParams(0, -2, 1f))
-        includeSystem = Switch(this).apply {
+        includeSystem = androidx.appcompat.widget.SwitchCompat(this).apply {
             text = "כולל אפליקציות מערכת"
             textSize = 11f
             setTextColor(palette.text)
@@ -205,7 +205,7 @@ class AppBackupPickerActivity : AppCompatActivity() {
                 val cached = iconCache.get(app.packageName) ?: runCatching {
                     packageManager.getApplicationIcon(app.applicationInfo)
                 }.getOrNull()?.also { iconCache.put(app.packageName, it) }
-                setImageDrawable(cached ?: getDrawable(android.R.drawable.sym_def_app_icon))
+                setImageDrawable(cached ?: AppCompatResources.getDrawable(this@AppBackupPickerActivity, android.R.drawable.sym_def_app_icon))
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }
             card.addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)))
@@ -305,7 +305,7 @@ class AppBackupPickerActivity : AppCompatActivity() {
             text = value
             textSize = size.toFloat()
             setTextColor(color)
-            gravity = Gravity.RIGHT
+            gravity = Gravity.END
             if (bold) typeface = Typeface.DEFAULT_BOLD
         }
 
