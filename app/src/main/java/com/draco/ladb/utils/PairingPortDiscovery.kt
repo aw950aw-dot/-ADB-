@@ -69,7 +69,8 @@ class PairingPortDiscovery(context: Context) {
                                         if (isLocal && reachable) {
                                             foundEndpoint.compareAndSet(
                                                 null,
-                                                PairingEndpoint(host.hostAddress, port)
+                                                // Pair from the local ADB client through loopback, as Shizuku does.
+                                                PairingEndpoint("localhost", port)
                                             )
                                             finished.countDown()
                                         }
