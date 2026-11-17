@@ -72,7 +72,9 @@ class PairingService : Service() {
             }
 
             val nsd = getSystemService(NSD_SERVICE) as NsdManager
-            DnsDiscover.getInstance(applicationContext, nsd).scanAdbPorts()
+            val discovery = DnsDiscover.getInstance(applicationContext, nsd)
+            discovery.stopScan()
+            discovery.scanAdbPorts()
             val connected = adb.initServer(skipWirelessReset = true)
             if (connected) adb.ensureShellDeathMonitor()
 
