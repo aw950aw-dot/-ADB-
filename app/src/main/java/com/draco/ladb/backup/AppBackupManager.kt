@@ -124,7 +124,7 @@ object AppBackupManager {
         val payloads = mutableListOf<Payload>()
         val notes = mutableListOf<String>()
         try {
-            val privateBase = "/data/user/$userId"
+            val privateBase = privateDataBase(context)
             val privatePath = "$privateBase/$packageName"
             val privateTar = File(work, "private-user.tar")
             val privatePayload = if (rootAvailable) {
@@ -143,7 +143,7 @@ object AppBackupManager {
             }
 
             if (rootAvailable) {
-                val deviceBase = "/data/user_de/$userId"
+                val deviceBase = deviceProtectedDataBase(context)
                 val devicePath = "$deviceBase/$packageName"
                 val deviceTar = File(work, "private-device.tar")
                 val devicePayload = tryRootTar(
@@ -155,11 +155,15 @@ object AppBackupManager {
                 else notes += "נתוני Device Protected לא נכללו: לא ניתן היה לקרוא אותם גם עם Root."
             }
 
-            val sharedPaths = listOf(
-                Triple("external_data", "/sdcard/Android/data", "external_data.tar"),
-                Triple("external_media", "/sdcard/Android/media", "external_media.tar"),
-                Triple("obb", "/sdcard/Android/obb", "obb.tar")
-            )
+            val externalRoot = externalStorageBase(context)
+            if (externalRoot == null) notes += "אחסון חיצוני לא נכלל: Android לא החזיר נתיב אחסון."
+            val sharedPaths = externalRoot?.let { root ->
+                listOf(
+                    Triple("external_data", "$root/Android/data", "external_data.tar"),
+                    Triple("external_media", "$root/Android/media", "external_media.tar"),
+                    Triple("obb", "$root/Android/obb", "obb.tar")
+                )
+            }.orEmpty()
             sharedPaths.forEach { (type, base, name) ->
                 val path = "$base/$packageName"
                 val tar = File(work, name)
@@ -309,20 +313,20 @@ object AppBackupManager {
                 val success = when (payload.type) {
                     "private_user" -> {
                         if (payload.method == "ROOT" && rootAvailable) {
-                            val base = "/data/user/$userId"
+                            val base = privateDataBase(context)
                             val target = "$base/$pkg"
                             val inner = "mkdir -p ${quote(base)} && tar -xpf - -C ${quote(base)} && " +
                                 "chown -R $appUid:$appUid ${quote(target)} && restorecon -RF ${quote(target)}"
                             runCatching { RootAccessManager.execInFile(payload.file, inner, 600); true }.getOrDefault(false)
                         } else if (payload.method == "RUN_AS") {
-                            val target = "/data/user/$userId/$pkg"
+                            val target = "${privateDataBase(context)}/$pkg"
                             val inner = "tar -xpf - -C ${quote(target)}"
                             runCatching { adb.execInFile(payload.file, "run-as $pkg sh -c ${quote(inner)}", 600).exitCode == 0 }.getOrDefault(false)
                         } else false
                     }
                     "private_device" -> {
                         if (rootAvailable) {
-                            val base = "/data/user_de/$userId"
+                            val base = deviceProtectedDataBase(context)
                             val target = "$base/$pkg"
                             val inner = "mkdir -p ${quote(base)} && tar -xpf - -C ${quote(base)} && " +
                                 "chown -R $appUid:$appUid ${quote(target)} && restorecon -RF ${quote(target)}"
@@ -330,16 +334,21 @@ object AppBackupManager {
                         } else false
                     }
                     "external_data", "external_media", "obb" -> {
-                        val base = when (payload.type) {
-                            "external_data" -> "/sdcard/Android/data"
-                            "external_media" -> "/sdcard/Android/media"
-                            else -> "/sdcard/Android/obb"
-                        }
-                        val inner = "mkdir -p ${quote(base)} && tar -xpf - -C ${quote(base)}"
-                        if (payload.method == "ROOT" && rootAvailable) {
-                            runCatching { RootAccessManager.execInFile(payload.file, inner, 600); true }.getOrDefault(false)
+                        val externalRoot = externalStorageBase(context)
+                        if (externalRoot == null) {
+                            false
                         } else {
-                            runCatching { adb.execInFile(payload.file, "sh -c ${quote(inner)}", 600).exitCode == 0 }.getOrDefault(false)
+                            val base = when (payload.type) {
+                                "external_data" -> "$externalRoot/Android/data"
+                                "external_media" -> "$externalRoot/Android/media"
+                                else -> "$externalRoot/Android/obb"
+                            }
+                            val inner = "mkdir -p ${quote(base)} && tar -xpf - -C ${quote(base)}"
+                            if (payload.method == "ROOT" && rootAvailable) {
+                                runCatching { RootAccessManager.execInFile(payload.file, inner, 600); true }.getOrDefault(false)
+                            } else {
+                                runCatching { adb.execInFile(payload.file, "sh -c ${quote(inner)}", 600).exitCode == 0 }.getOrDefault(false)
+                            }
                         }
                     }
                     else -> false
@@ -527,6 +536,19 @@ object AppBackupManager {
         }
         return runCatching { getPackageInfo(pm, packageName) }.getOrNull()
     }
+
+    private fun privateDataBase(context: Context): String =
+        context.dataDir.parentFile?.absolutePath
+            ?: error("לא ניתן לזהות את תיקיית נתוני המשתמש הפעיל.")
+
+    private fun deviceProtectedDataBase(context: Context): String =
+        context.createDeviceProtectedStorageContext().dataDir.parentFile?.absolutePath
+            ?: error("לא ניתן לזהות את תיקיית Device Protected של המשתמש הפעיל.")
+
+    private fun externalStorageBase(context: Context): String? =
+        context.getExternalFilesDir(null)?.let { filesDir ->
+            filesDir.parentFile?.parentFile?.parentFile?.parentFile?.absolutePath
+        }
 
     private fun currentUserId(adb: ADB): Int {
         val result = adb.executeShell("am get-current-user", 20)
