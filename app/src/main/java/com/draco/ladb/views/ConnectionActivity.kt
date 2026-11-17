@@ -241,7 +241,7 @@ class ConnectionActivity : AppCompatActivity() {
         content.addView(pairButton, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(12) })
 
         content.addView(actionButton("פתח מסך צימוד אלחוטי", palette.surfaceAlt, palette.text) {
-            openDeveloperSettings()
+            openWirelessPairingSettings()
         }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(9) })
 
         content.addView(text(
@@ -254,7 +254,7 @@ class ConnectionActivity : AppCompatActivity() {
         UiComponents.applySystemBars(this, page, palette)
     }
 
-    private fun openDeveloperSettings() {
+    private fun openWirelessPairingSettings() {
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
