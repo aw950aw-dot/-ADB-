@@ -4,6 +4,17 @@ plugins {
     id 'com.google.android.gms.oss-licenses-plugin'
 }
 
+def releaseStorePath = System.getenv("ADB_SMART_KEYSTORE_PATH")
+def releaseStorePassword = System.getenv("ADB_SMART_STORE_PASSWORD")
+def releaseKeyAlias = System.getenv("ADB_SMART_KEY_ALIAS")
+def releaseKeyPassword = System.getenv("ADB_SMART_KEY_PASSWORD")
+def hasAnyReleaseSigning = [releaseStorePath, releaseStorePassword, releaseKeyAlias, releaseKeyPassword]
+    .any { it != null && !it.isEmpty() }
+def hasCompleteReleaseSigning = [releaseStorePath, releaseStorePassword, releaseKeyAlias, releaseKeyPassword]
+    .every { it != null && !it.isEmpty() }
+if (hasAnyReleaseSigning && !hasCompleteReleaseSigning) {
+    throw new GradleException("ADB SMART release signing is incomplete. Configure all four ADB_SMART_* signing values.")
+}
 
 android {
     compileSdk 36
@@ -20,9 +31,20 @@ android {
         }
     }
 
+    signingConfigs {
+        release {
+            if (hasCompleteReleaseSigning) {
+                storeFile file(releaseStorePath)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig signingConfigs.debug
+            signingConfig hasCompleteReleaseSigning ? signingConfigs.release : signingConfigs.debug
             minifyEnabled false
             shrinkResources false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
