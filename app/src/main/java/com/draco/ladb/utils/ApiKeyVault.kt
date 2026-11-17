@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import androidx.core.content.edit
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -39,15 +40,20 @@ object ApiKeyVault {
         val prefs = context.getSharedPreferences(PREFS, 0)
         val prefName = "key_" + id
         if (value.isBlank()) {
-            prefs.edit().remove(prefName).apply()
-            if (id == "gemini") prefs.edit().remove("key").apply()
+            prefs.edit {
+                remove(prefName)
+                if (id == "gemini") remove("key")
+            }
             return
         }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key("adb_ai_api_key_" + id))
         val payload = cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8))
-        prefs.edit().putString(prefName, Base64.encodeToString(payload, Base64.NO_WRAP)).apply()
-        if (id == "gemini") prefs.edit().putString("key", Base64.encodeToString(payload, Base64.NO_WRAP)).apply()
+        val encoded = Base64.encodeToString(payload, Base64.NO_WRAP)
+        prefs.edit {
+            putString(prefName, encoded)
+            if (id == "gemini") putString("key", encoded)
+        }
     }
 
     fun read(context: Context): String = read(context, "gemini")
