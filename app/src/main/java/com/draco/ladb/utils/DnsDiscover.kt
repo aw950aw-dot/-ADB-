@@ -5,12 +5,14 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
-import com.draco.ladb.utils.DnsDiscover.Companion.adbPort
-import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Locale
+import java.util.TimeZone
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "DNS"
@@ -19,242 +21,171 @@ class DnsDiscover private constructor(
     private val context: Context,
     private val nsdManager: NsdManager
 ) {
-    private var started = false
+    @Volatile private var started = false
     private var bestExpirationTime: Long? = null
     private var bestServiceName: String? = null
-
-    private var pendingServices: MutableList<NsdServiceInfo> = Collections.synchronizedList(ArrayList())
+    private val pendingNames = ConcurrentHashMap.newKeySet<String>()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     companion object {
-        private var instance: DnsDiscover? = null
-        var adbPort: Int? = null
-        var pendingResolves = AtomicBoolean(false)
-        var aliveTime: Long? = null
+        @Volatile private var instance: DnsDiscover? = null
+        @Volatile var adbPort: Int? = null
+        val pendingResolves = AtomicBoolean(false)
+        @Volatile var aliveTime: Long? = null
 
-        fun getInstance(context: Context, nsdManager: NsdManager): DnsDiscover {
-            return instance ?: DnsDiscover(context, nsdManager).also { instance = it }
-        }
+        fun getInstance(context: Context, nsdManager: NsdManager): DnsDiscover =
+            instance ?: synchronized(this) {
+                instance ?: DnsDiscover(context.applicationContext, nsdManager).also { instance = it }
+            }
     }
 
-    /**
-     * Start the scan for the best ADB port to connect to. Only needs to be started once.
-     */
+    @Synchronized
     fun scanAdbPorts() {
-        if (started) {
-            Log.w(TAG, "Already started")
-            return
-        }
+        if (started) return
         started = true
         aliveTime = System.currentTimeMillis()
-        nsdManager.discoverServices(
-            "_adb-tls-connect._tcp",
-            NsdManager.PROTOCOL_DNS_SD,
-            discoveryListener
-        )
+        adbPort = null
+        bestExpirationTime = null
+        bestServiceName = null
+        pendingNames.clear()
+        pendingResolves.set(false)
+        try {
+            nsdManager.discoverServices("_adb-tls-connect._tcp.", NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+        } catch (error: Exception) {
+            started = false
+            Log.e(TAG, "Could not start ADB service discovery", error)
+        }
     }
 
-    /**
-     * Returns the device's local IP address, or null if an error occurred.
-     */
-    fun getLocalIpAddress(): String? {
-        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = connectivityManager.activeNetwork ?: return null
-        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return null
+    fun getLocalIpAddress(): String? = getLocalIpAddresses().firstOrNull()
 
-        // Ensure it's a valid Wi-Fi connection
-        if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+    private fun getLocalIpAddresses(): Set<String> {
+        val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val network = connectivity?.activeNetwork
+        val capabilities = network?.let { connectivity.getNetworkCapabilities(it) }
+        if (capabilities != null &&
+            !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+            !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+        ) return emptySet()
 
-            try {
-                val interfaces = NetworkInterface.getNetworkInterfaces()
-                while (interfaces.hasMoreElements()) {
-                    val networkInterface = interfaces.nextElement()
-                    val addresses = networkInterface.inetAddresses
-
-                    while (addresses.hasMoreElements()) {
-                        val inetAddress = addresses.nextElement()
-                        if (!inetAddress.isLoopbackAddress && inetAddress is Inet4Address) {
-                            return inetAddress.hostAddress
-                        }
+        return runCatching {
+            val interfaces = NetworkInterface.getNetworkInterfaces() ?: return@runCatching emptySet()
+            val result = mutableSetOf<String>()
+            while (interfaces.hasMoreElements()) {
+                val networkInterface = interfaces.nextElement()
+                if (!networkInterface.isUp || networkInterface.isLoopback) continue
+                val addresses = networkInterface.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val address = addresses.nextElement()
+                    if (!address.isLoopbackAddress && !address.isLinkLocalAddress) {
+                        result.add(address.hostAddress.substringBefore('%'))
                     }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
             }
-        }
-
-        return null
+            result
+        }.getOrDefault(emptySet())
     }
 
-    /**
-     * Determines if the service is the most recent to broadcast, and if so, sets it as the [adbPort].
-     */
-    private fun updateIfNewest(serviceInfo: NsdServiceInfo) {
-        val port = serviceInfo.port
-        val expirationTime = parseExpirationTime(serviceInfo.toString())
-        val serviceName = serviceInfo.serviceName
-
-        Log.d("EXPTIME", "$expirationTime")
-
-        fun getHighestNumberedString(strings: List<String>): String {
-            return strings.maxByOrNull {
-                """\((\d+)\)""".toRegex().find(it)?.groupValues?.get(1)?.toIntOrNull() ?: -1
-            } ?: strings.first() // Fallback to first if all are unnumbered
-        }
-
-        fun update() {
+    private fun updateIfNewest(info: NsdServiceInfo) {
+        val port = info.port
+        if (port !in 1..65535) return
+        val expiry = parseExpirationTime(info.toString())
+        val name = info.serviceName.orEmpty()
+        val shouldUpdate = adbPort == null ||
+            (expiry != null && (bestExpirationTime == null || expiry > bestExpirationTime!!)) ||
+            (expiry == null && bestExpirationTime == null &&
+                serviceNameRank(name) > serviceNameRank(bestServiceName.orEmpty()))
+        if (shouldUpdate) {
             adbPort = port
-            bestExpirationTime = expirationTime
-            bestServiceName = serviceName
-            Log.d(TAG, "Updated best match: $adbPort, $bestServiceName, $bestExpirationTime")
-        }
-
-        // If nothing set yet, be the first.
-        if (adbPort == null) {
-            Log.d(TAG, "ADB port not yet set, updating best match...")
-            update()
-            return
-        }
-
-        // If something already set, but we have new expiration time data...
-        if (expirationTime != null) {
-            // And if best expiration time is not set yet, update.
-            if (bestExpirationTime == null) {
-                Log.d(TAG, "Expiration time not yet set, updating best match...")
-                update()
-                return
-            }
-
-            // And if expiration time data is better than the best, update.
-            if (expirationTime > bestExpirationTime!!) {
-                Log.d(TAG, "Expiration time is better, updating best match...")
-                update()
-                return
-            } else {
-                // If worse, don't set.
-                return
-            }
-        }
-
-        // If something already set, but we have new service name data, try to see if
-        // the service name is newer.
-        // Ex. ADB, ADB (2), ADB (3)
-        if (serviceName == getHighestNumberedString(listOf(bestServiceName ?: "", serviceName))) {
-            Log.d(TAG, "Service name is newer, updating best match...")
-            update()
-            return
+            bestExpirationTime = expiry
+            bestServiceName = name
+            Log.d(TAG, "Selected local ADB port $port ($name)")
         }
     }
 
-    /**
-     * If expiration time is included in the txtRecord, extract it and convert it to epoch time.
-     */
-    private fun parseExpirationTime(rawString: String): Long? {
-        val regex = """expirationTime: (\S+)""".toRegex()
-        val expirationTimeStr = regex.find(rawString)?.groupValues?.get(1)
+    private fun serviceNameRank(value: String): Int =
+        Regex("\\((\\d+)\\)").find(value)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
 
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-        dateFormat.timeZone = TimeZone.getTimeZone("UTC")
-
-        return try {
-            dateFormat.parse(expirationTimeStr ?: "")?.time
-        } catch (_: Exception) {
-            null
-        }
+    private fun parseExpirationTime(raw: String): Long? {
+        val value = Regex("""expirationTime: (\S+)""").find(raw)?.groupValues?.getOrNull(1) ?: return null
+        return runCatching {
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }.parse(value)?.time
+        }.getOrNull()
     }
 
-    /**
-     * When a service is resolved, handle it.
-     */
-    private fun handleResolvedService(serviceInfo: NsdServiceInfo) {
-        Log.d(TAG, "Resolve successful: $serviceInfo")
-        Log.d(TAG, "Port: ${serviceInfo.port}")
-
-        val ipAddress = getLocalIpAddress()
-        Log.d("IP ADDRESS", ipAddress ?: "N/A")
-
-        val discoveredAddress = serviceInfo.host.hostAddress
-        if (ipAddress != null && discoveredAddress != ipAddress) {
-            Log.d(TAG, "IP does not match device, but not skipping...")
-            //return
-        }
-
-        if (serviceInfo.port == 0) {
-            Log.d(TAG, "Port is zero, skipping...")
-            return
-        }
-
-        updateIfNewest(serviceInfo)
+    private fun finishResolve(name: String) {
+        if (name.isNotBlank()) pendingNames.remove(name)
+        pendingResolves.set(pendingNames.isNotEmpty())
     }
 
-    /**
-     * When service gets discovered, attempt to resolve it.
-     */
-    private fun resolveService(service: NsdServiceInfo) {
-        // Create new listener.
-        val resolveListener = object : NsdManager.ResolveListener {
-            override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                Log.e(TAG, "Resolve failed: $errorCode: $serviceInfo")
-
-                when (errorCode) {
-                    NsdManager.FAILURE_ALREADY_ACTIVE -> {
-                        // Re-run the resolve until it resolves.
-                        resolveService(serviceInfo)
+    private fun resolveService(service: NsdServiceInfo, retry: Int = 0) {
+        try {
+            nsdManager.resolveService(service, object : NsdManager.ResolveListener {
+                override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                    Log.w(TAG, "Resolve failed ($errorCode) for \${serviceInfo.serviceName}")
+                    if (errorCode == NsdManager.FAILURE_ALREADY_ACTIVE && retry < 2) {
+                        mainHandler.postDelayed({ resolveService(service, retry + 1) }, 300L * (retry + 1))
+                    } else {
+                        finishResolve(service.serviceName.orEmpty())
                     }
                 }
-            }
 
-            override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                handleResolvedService(serviceInfo)
-
-                // Remove service after it's been resolved.
-                pendingServices.removeAll { it.serviceName == serviceInfo.serviceName }
-
-                // If we're all done, let anyone waiting know.
-                if (pendingServices.isEmpty()) {
-                    pendingResolves.set(false)
+                override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
+                    try {
+                        val port = serviceInfo.port
+                        if (port !in 1..65535) return
+                        val host = serviceInfo.host?.hostAddress?.substringBefore('%')
+                        val localAddresses = getLocalIpAddresses()
+                        if (host != null && localAddresses.isNotEmpty() && host !in localAddresses) {
+                            Log.d(TAG, "Ignoring ADB service not hosted by this device: $host")
+                            return
+                        }
+                        updateIfNewest(serviceInfo)
+                    } catch (error: Exception) {
+                        Log.w(TAG, "Could not process resolved ADB service", error)
+                    } finally {
+                        finishResolve(serviceInfo.serviceName.orEmpty())
+                    }
                 }
-
-                Log.d(TAG, "Service resolved, pending: ${pendingServices.size}")
-            }
+            })
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not resolve ADB service", error)
+            finishResolve(service.serviceName.orEmpty())
         }
-
-        // Resolve service with listener.
-        nsdManager.resolveService(service, resolveListener)
     }
 
     val discoveryListener = object : NsdManager.DiscoveryListener {
-        override fun onDiscoveryStarted(regType: String) {
-            Log.d(TAG, "Service discovery started")
+        override fun onDiscoveryStarted(serviceType: String) {
+            Log.d(TAG, "ADB service discovery started")
         }
 
         override fun onServiceFound(service: NsdServiceInfo) {
-            Log.d(TAG, "Service discovery: $service")
-            Log.d(TAG, "Port: ${service.port}")
-
-            pendingServices.add(service)
+            val name = service.serviceName.orEmpty()
+            if (name.isBlank() || !pendingNames.add(name)) return
             pendingResolves.set(true)
-            Log.d(TAG, "Service found, pending: ${pendingServices.size}")
-
             resolveService(service)
         }
 
         override fun onServiceLost(service: NsdServiceInfo) {
-            Log.e(TAG, "Service lost: $service")
+            finishResolve(service.serviceName.orEmpty())
         }
 
         override fun onDiscoveryStopped(serviceType: String) {
-            Log.i(TAG, "Discovery stopped: $serviceType")
+            Log.d(TAG, "ADB service discovery stopped: $serviceType")
         }
 
         override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-            Log.e(TAG, "Discovery failed: Error code:$errorCode")
-            nsdManager.stopServiceDiscovery(this)
+            Log.e(TAG, "ADB discovery failed to start: $errorCode")
+            pendingNames.clear()
+            pendingResolves.set(false)
+            synchronized(this@DnsDiscover) { started = false }
+            runCatching { nsdManager.stopServiceDiscovery(this) }
         }
 
         override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
-            Log.e(TAG, "Discovery failed: Error code:$errorCode")
-            nsdManager.stopServiceDiscovery(this)
+            Log.e(TAG, "ADB discovery failed to stop: $errorCode")
         }
     }
-
 }

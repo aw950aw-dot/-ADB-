@@ -71,6 +71,7 @@ object AppBackupManager {
     private data class ExtractedBackup(
         val packageName: String,
         val appLabel: String,
+        val versionCode: Long,
         val signerSha256: String,
         val directory: File,
         val apks: List<File>,
@@ -239,16 +240,23 @@ object AppBackupManager {
         try {
             val pm = context.packageManager
             var installed = runCatching { getPackageInfo(pm, backup.packageName) }.getOrNull()
-            if (installed == null) {
-                val installResult = adb.installApkSet(backup.apks)
-                adb.executeShell("sleep 2", 5)
-                installed = getPackageInfo(pm, backup.packageName)
-                if (!signerFingerprint(installed).equals(backup.signerSha256, ignoreCase = true)) {
-                    error("חתימת האפליקציה שהותקנה אינה תואמת לגיבוי.")
-                }
-            } else {
+            if (installed != null) {
                 require(signerFingerprint(installed).equals(backup.signerSha256, ignoreCase = true)) {
                     "חתימת האפליקציה במכשיר אינה תואמת לגיבוי. לא בוצע שינוי בנתונים."
+                }
+                require(safeVersionCode(installed) <= backup.versionCode) {
+                    "במכשיר מותקנת גרסה חדשה יותר מזו שבגיבוי. כדי למנוע פגיעה בנתונים, השחזור נעצר."
+                }
+            }
+            if (installed == null || safeVersionCode(installed) < backup.versionCode) {
+                adb.installApkSet(backup.apks)
+                installed = waitForPackageInfo(pm, backup.packageName, 15_000L)
+                    ?: error("ההתקנה הסתיימה, אך Android עדיין לא הציג את האפליקציה ברשימה.")
+                require(signerFingerprint(installed).equals(backup.signerSha256, ignoreCase = true)) {
+                    "חתימת האפליקציה שהותקנה אינה תואמת לגיבוי."
+                }
+                require(safeVersionCode(installed) == backup.versionCode) {
+                    "גרסת האפליקציה שהותקנה אינה תואמת לגרסת הגיבוי."
                 }
             }
 
@@ -336,7 +344,7 @@ object AppBackupManager {
     ): Payload? {
         return try {
             RootAccessManager.execOutToFile(command, file, 600)
-            validateTarArchive(file)
+            validateTarArchive(file, sourcePath.substringAfterLast('/'))
             Payload("data/$type.tar", file, type, "ROOT", sourcePath)
         } catch (_: Exception) {
             file.delete()
@@ -356,7 +364,7 @@ object AppBackupManager {
             adb.execOutToFile(command, file, 600)
             if (file.length() <= 0L) null
             else {
-                validateTarArchive(file)
+                validateTarArchive(file, if (method == "RUN_AS") null else sourcePath.substringAfterLast('/'))
                 Payload("data/$type.tar", file, type, method, sourcePath)
             }
         } catch (_: Exception) {
@@ -450,21 +458,39 @@ object AppBackupManager {
                 require(declared.add(name)) { "קובץ נתונים כפול במניפסט." }
                 val file = extracted[name] ?: error("חסר קובץ נתונים: $name")
                 verifyFile(file, item.getLong("size"), item.getString("sha256"))
-                validateTarArchive(file)
                 val type = item.getString("type")
                 require(type in setOf("private_user", "private_device", "external_data", "external_media", "obb")) {
                     "סוג נתונים לא מוכר בגיבוי."
                 }
                 val method = item.getString("method")
                 require(method in setOf("ROOT", "RUN_AS", "SHELL")) { "שיטת גיבוי לא מוכרת." }
+                validateTarArchive(file, if (method == "RUN_AS") null else pkg)
                 payloads += Payload(name, file, type, method, item.optString("sourcePath"))
             }
             require(declared == extracted.keys) { "נמצאו קבצים שאינם רשומים במניפסט." }
-            return ExtractedBackup(pkg, manifest.optString("appLabel", pkg), signer, root, apkFiles, payloads)
+            return ExtractedBackup(
+                pkg,
+                manifest.optString("appLabel", pkg),
+                manifest.optLong("versionCode", 0L),
+                signer,
+                root,
+                apkFiles,
+                payloads
+            )
         } catch (error: Throwable) {
             root.deleteRecursively()
             throw error
         }
+    }
+
+    private fun waitForPackageInfo(pm: PackageManager, packageName: String, timeoutMillis: Long): PackageInfo? {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (System.currentTimeMillis() < deadline) {
+            val info = runCatching { getPackageInfo(pm, packageName) }.getOrNull()
+            if (info != null) return info
+            Thread.sleep(250)
+        }
+        return runCatching { getPackageInfo(pm, packageName) }.getOrNull()
     }
 
     private fun currentUserId(adb: ADB): Int {
@@ -544,7 +570,7 @@ object AppBackupManager {
      * Validate TAR paths and reject links/extensions before extraction with Root.
      * Only ordinary USTAR files and directories are accepted.
      */
-    private fun validateTarArchive(file: File) {
+    private fun validateTarArchive(file: File, requiredTopLevel: String? = null) {
         FileInputStream(file).buffered().use { input ->
             val header = ByteArray(512)
             var entries = 0
@@ -571,6 +597,11 @@ object AppBackupManager {
                     "הגיבוי כולל קישור או סוג קובץ TAR שאינו נתמך; השחזור נעצר מטעמי בטיחות."
                 }
                 require(isSafeTarPath(path) && (path.isNotEmpty() || type == '5')) { "נתיב לא בטוח בקובץ TAR." }
+                if (requiredTopLevel != null && path.isNotEmpty()) {
+                    require(path.substringBefore('/') == requiredTopLevel) {
+                        "קובץ TAR מכיל נתיב שאינו שייך לאפליקציה שבגיבוי."
+                    }
+                }
                 val sizeText = tarString(header, 124, 12).trim()
                 val size = if (sizeText.isBlank()) 0L else sizeText.trimStart('0').ifBlank { "0" }.toLongOrNull(8)
                     ?: error("גודל פריט TAR אינו תקין.")

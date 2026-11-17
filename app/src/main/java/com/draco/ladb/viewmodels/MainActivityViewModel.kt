@@ -14,6 +14,7 @@ import com.draco.ladb.R
 import com.draco.ladb.utils.ADB
 import com.draco.ladb.utils.DnsDiscover
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
@@ -22,6 +23,9 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
     private val _outputText = MutableLiveData<String>()
     @Volatile private var outputStartOffset = 0L
     private val maxVisibleOutputBytes = 512 * 1024
+    private var lastOutputSize = -1L
+    private var lastOutputModified = -1L
+    private var cachedOutput = ""
     val outputText: LiveData<String> = _outputText
 
     val isPairing = MutableLiveData<Boolean>()
@@ -69,7 +73,7 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
                 val currentText = _outputText.value
                 if (out != currentText)
                     _outputText.postValue(out)
-                Thread.sleep(ADB.OUTPUT_BUFFER_DELAY_MS)
+                delay(ADB.OUTPUT_BUFFER_DELAY_MS)
             }
         }
     }
@@ -87,9 +91,14 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
      * Erase all shell text
      */
     fun clearOutputText() {
-        // Keep the file descriptor used by the long-running ADB shell intact.
         synchronized(adb.outputBufferFile) {
-            outputStartOffset = if (adb.outputBufferFile.exists()) adb.outputBufferFile.length() else 0L
+            runCatching {
+                java.io.RandomAccessFile(adb.outputBufferFile, "rw").use { it.setLength(0L) }
+            }
+            outputStartOffset = 0L
+            lastOutputSize = -1L
+            lastOutputModified = -1L
+            cachedOutput = ""
         }
         _outputText.postValue("")
     }
@@ -116,22 +125,33 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
      */
     private fun readOutputFile(file: File): String {
         synchronized(file) {
-            if (!file.exists()) return ""
+            if (!file.exists()) {
+                cachedOutput = ""
+                lastOutputSize = -1L
+                return ""
+            }
             val size = file.length()
+            val modified = file.lastModified()
+            if (size == lastOutputSize && modified == lastOutputModified) return cachedOutput
             if (outputStartOffset > size) outputStartOffset = 0L
             val requestedStart = outputStartOffset
             val start = maxOf(requestedStart, size - maxVisibleOutputBytes)
-            val length = (size - start).coerceAtLeast(0L).coerceAtMost(maxVisibleOutputBytes.toLong()).toInt()
-            if (length == 0) return ""
+            val length = (size - start).coerceAtLeast(0L)
+                .coerceAtMost(maxVisibleOutputBytes.toLong()).toInt()
             val bytes = ByteArray(length)
-            java.io.RandomAccessFile(file, "r").use { input ->
-                input.seek(start)
-                input.readFully(bytes)
+            if (length > 0) {
+                java.io.RandomAccessFile(file, "r").use { input ->
+                    input.seek(start)
+                    input.readFully(bytes)
+                }
             }
             val content = String(bytes, Charsets.UTF_8)
-            return if (start > requestedStart) {
-                "… הפלט הישן קוצר כדי לשמור על תגובה מהירה. אפשר לנקות פלט ולהתחיל מחדש. …\n$content"
+            cachedOutput = if (start > requestedStart) {
+                "… הפלט הישן קוצר כדי לשמור על תגובה מהירה. …\n$content"
             } else content
+            lastOutputSize = size
+            lastOutputModified = modified
+            return cachedOutput
         }
     }
 }

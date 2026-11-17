@@ -20,14 +20,14 @@ import kotlin.time.Duration.Companion.seconds
 
 class ADB(private val context: Context) {
     companion object {
-        const val MAX_OUTPUT_BUFFER_SIZE = 1024 * 16
-        const val OUTPUT_BUFFER_DELAY_MS = 100L
+        const val MAX_OUTPUT_BUFFER_SIZE = 512 * 1024
+        const val OUTPUT_BUFFER_DELAY_MS = 250L
 
         @SuppressLint("StaticFieldLeak")
         @Volatile
         private var instance: ADB? = null
         fun getInstance(context: Context): ADB = instance ?: synchronized(this) {
-            instance ?: ADB(context).also { instance = it }
+            instance ?: ADB(context.applicationContext).also { instance = it }
         }
     }
 
@@ -42,7 +42,7 @@ class ADB(private val context: Context) {
     private val _running = MutableLiveData(false)
     val running: LiveData<Boolean> = _running
 
-    private var tryingToPair = false
+    @Volatile private var tryingToPair = false
 
     /**
      * Is the shell closed for any reason?
@@ -53,8 +53,9 @@ class ADB(private val context: Context) {
     /**
      * Where shell output is stored
      */
-    val outputBufferFile: File = File.createTempFile("buffer", ".txt").also {
-        it.deleteOnExit()
+    val outputBufferFile: File = File(context.cacheDir, "adb-smart-shell-output.log").apply {
+        parentFile?.mkdirs()
+        if (!exists()) createNewFile()
     }
 
     /**
@@ -79,42 +80,29 @@ class ADB(private val context: Context) {
      */
     fun getDevices(): List<String> {
         val devicesProcess = adb(false, listOf("devices"))
-        devicesProcess.waitFor()
-
-        /* Get result of the command. */
-        val linesRaw = BufferedReader(devicesProcess.inputStream.reader()).readLines()
-
-        /* Remove "List of devices attached" line if it exists (it should). */
-        val deviceLines = linesRaw.filterNot { it ->
-            it.contains("List of devices attached")
+        if (!devicesProcess.waitFor(15, TimeUnit.SECONDS)) {
+            devicesProcess.destroyForcibly()
+            throw IllegalStateException("בדיקת התקני ADB חרגה מזמן ההמתנה.")
         }
-
-        /* Just get first part with device name/IP and port. */
-        var deviceNames = deviceLines.map { it ->
-            it.split("\t").first()
+        val linesRaw = BufferedReader(devicesProcess.inputStream.reader()).use { it.readLines() }
+        val deviceNames = linesRaw.mapNotNull { line ->
+            val parts = line.trim().split(Regex("\\s+"))
+            if (parts.size >= 2 && parts[1] == "device") parts[0] else null
         }
-
-        /* Remove any empty lines. */
-        deviceNames = deviceNames.filterNot { it ->
-            it.isEmpty()
-        }
-
-        for (name in deviceNames) {
-            Log.d("LINES", "<<<$name>>>")
-        }
-
+        deviceNames.forEach { Log.d("ADB", "device=$it") }
         return deviceNames
     }
 
     /**
      * Start the ADB server
      */
+    @Synchronized
     fun initServer(): Boolean {
-        if (_running.value == true || tryingToPair)
-            return true
+        if (_running.value == true) return true
+        if (tryingToPair) return false
 
         tryingToPair = true
-
+        try {
         val autoShell = sharedPrefs.getBoolean(context.getString(R.string.auto_shell_key), true)
 
         val secureSettingsGranted =
@@ -145,8 +133,13 @@ class ADB(private val context: Context) {
                     debug("Settings -> Developer options -> Wireless debugging")
                     debug("Waiting for wireless debugging...")
 
+                    val waitUntil = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(120)
                     while (!isWirelessDebuggingEnabled()) {
-                        Thread.sleep(1_000)
+                        if (System.currentTimeMillis() >= waitUntil) {
+                            debug("Wireless Debugging לא הופעל בתוך שתי דקות.")
+                            return false
+                        }
+                        Thread.sleep(500)
                     }
                 }
             } else {
@@ -155,8 +148,13 @@ class ADB(private val context: Context) {
                     debug("Settings -> Developer options -> USB debugging")
                     debug("Waiting for USB debugging...")
 
+                    val waitUntil = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(120)
                     while (!isUSBDebuggingEnabled()) {
-                        Thread.sleep(1_000)
+                        if (System.currentTimeMillis() >= waitUntil) {
+                            debug("USB Debugging לא הופעל בתוך שתי דקות.")
+                            return false
+                        }
+                        Thread.sleep(500)
                     }
                 }
             }
@@ -277,9 +275,19 @@ class ADB(private val context: Context) {
             sendToShellProcess(startupCommand)
 
         _running.postValue(true)
-        tryingToPair = false
-
         return true
+        } catch (interrupted: InterruptedException) {
+            Thread.currentThread().interrupt()
+            _running.postValue(false)
+            debug("החיבור הופסק.")
+            return false
+        } catch (error: Exception) {
+            _running.postValue(false)
+            debug("שגיאת חיבור: ${error.message ?: "לא ידועה"}")
+            return false
+        } finally {
+            tryingToPair = false
+        }
     }
 
     private fun isWirelessDebuggingEnabled() =
@@ -370,7 +378,10 @@ class ADB(private val context: Context) {
     fun waitForDeathAndReset() {
         while (true) {
             /* Do not falsely claim the shell is dead if we haven't even initialized it yet */
-            if (tryingToPair) continue
+            if (tryingToPair) {
+                Thread.sleep(150)
+                continue
+            }
 
             shellProcess?.waitFor()
             _running.postValue(false)
@@ -452,18 +463,28 @@ class ADB(private val context: Context) {
         val processBuilder = ProcessBuilder(command)
             .directory(context.filesDir)
             .apply {
-                if (redirect) {
-                    redirectErrorStream(true)
-                    redirectOutput(outputBufferFile)
-                }
-
+                if (redirect) redirectErrorStream(true)
                 environment().apply {
                     put("HOME", context.filesDir.path)
                     put("TMPDIR", context.cacheDir.path)
                 }
             }
-
-        return processBuilder.start()!!
+        val process = processBuilder.start()
+        if (redirect) {
+            Thread {
+                runCatching {
+                    process.inputStream.use { input ->
+                        val buffer = ByteArray(8 * 1024)
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            if (count > 0) appendOutput(buffer, count)
+                        }
+                    }
+                }
+            }.apply { isDaemon = true; name = "ADBOutputCapture"; start() }
+        }
+        return process
     }
 
     /**
@@ -482,10 +503,26 @@ class ADB(private val context: Context) {
      * Write a debug message to the user
      */
     fun debug(msg: String) {
+        Log.d("DEBUG", msg)
+        val bytes = ("* $msg" + System.lineSeparator()).toByteArray(Charsets.UTF_8)
+        appendOutput(bytes, bytes.size)
+    }
+
+    private fun appendOutput(bytes: ByteArray, count: Int) {
         synchronized(outputBufferFile) {
-            Log.d("DEBUG", msg)
-            if (outputBufferFile.exists())
-                outputBufferFile.appendText("* $msg" + System.lineSeparator())
+            runCatching {
+                java.io.FileOutputStream(outputBufferFile, true).use { it.write(bytes, 0, count) }
+                val maxBytes = getOutputBufferSize().coerceIn(32 * 1024, 4 * 1024 * 1024)
+                val currentSize = outputBufferFile.length()
+                if (currentSize > maxBytes) {
+                    val tail = ByteArray(maxBytes)
+                    java.io.RandomAccessFile(outputBufferFile, "r").use { input ->
+                        input.seek(currentSize - maxBytes)
+                        input.readFully(tail)
+                    }
+                    java.io.FileOutputStream(outputBufferFile, false).use { it.write(tail) }
+                }
+            }.onFailure { Log.w("ADB", "Could not append shell output", it) }
         }
     }
 
