@@ -33,11 +33,6 @@
     </PreferenceCategory>
     <PreferenceCategory android:title="@string/troubleshooting">
         <Preference
-            android:icon="@drawable/ic_baseline_checklist_24"
-            android:key="@string/tutorial_key"
-            android:summary="@string/tutorial_summary"
-            android:title="@string/tutorial_title" />
-        <Preference
             android:icon="@drawable/ic_baseline_error_24"
             android:title="@string/error_waiting_title"
             app:summary="@string/error_waiting_summary" />
@@ -50,18 +45,8 @@
         <Preference
             android:icon="@drawable/ic_baseline_person_24"
             android:key="@string/developer_key"
-            android:summary="@string/developer_summary"
-            android:title="@string/developer_title" />
-        <Preference
-            android:icon="@drawable/ic_baseline_code_24"
-            android:key="@string/source_key"
-            android:summary="@string/source_summary"
-            android:title="@string/source_title" />
-        <Preference
-            android:icon="@drawable/ic_baseline_email_24"
-            android:key="@string/contact_key"
-            android:summary="@string/contact_summary"
-            android:title="@string/contact_title" />
+            android:summary="פתיחת פרופיל המפתח במתמחים טופ"
+            android:title="פרופיל במתמחים טופ" />
         <Preference
             android:icon="@drawable/ic_baseline_insert_drive_file_24"
             android:key="@string/licenses_key"
