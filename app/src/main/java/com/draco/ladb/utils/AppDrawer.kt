@@ -184,7 +184,7 @@ object AppDrawer {
         ))
 
         val profile = TextView(activity).apply {
-            text = "GitHub  •  aw950aw-dot"
+            text = "מתמחים טופ  •  פרופיל מפתח"
             textSize = 12f
             setTextColor(palette.accent)
             gravity = Gravity.CENTER
@@ -196,7 +196,7 @@ object AppDrawer {
                 runCatching {
                     activity.startActivity(Intent(
                         Intent.ACTION_VIEW,
-                        android.net.Uri.parse("https://github.com/aw950aw-dot")
+                        android.net.Uri.parse("https://mitmachim.top/user/%D7%90%D7%94%D7%A8%D7%9F")
                     ))
                 }
             }
