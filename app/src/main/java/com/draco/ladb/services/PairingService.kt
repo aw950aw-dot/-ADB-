@@ -25,7 +25,9 @@ class PairingService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    @Synchronized
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        latestStartId = startId
         val code = intent?.getStringExtra(EXTRA_PAIRING_CODE)
             ?.filter { it in '0'..'9' }
             .orEmpty()
@@ -35,7 +37,6 @@ class PairingService : Service() {
             return START_NOT_STICKY
         }
 
-        latestStartId = startId
         if (!workStarted) {
             workStarted = true
             try {
@@ -89,8 +90,12 @@ class PairingService : Service() {
             )
         } finally {
             PairingNotification.cancelWorking(applicationContext)
+            val stopId = synchronized(this) {
+                workStarted = false
+                latestStartId
+            }
             stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelfResult(latestStartId)
+            stopSelfResult(stopId)
         }
     }
 }
