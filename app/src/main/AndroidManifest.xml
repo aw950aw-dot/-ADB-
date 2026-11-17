@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" android:installLocation="internalOnly">
+    <queries>
+        <intent>
+            <action android:name="android.settings.WIRELESS_DEBUGGING_PAIRING_DIALOG"/>
+        </intent>
+    </queries>
     <uses-feature android:name="android.software.leanback" android:required="false"/>
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
     <uses-feature android:name="android.hardware.wifi" android:required="false"/>
@@ -19,6 +24,10 @@
         <receiver android:name=".utils.PairingReplyReceiver" android:exported="false"/>
         <service
             android:name=".services.PairingService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice"/>
+        <service
+            android:name=".services.PairingDiscoveryService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice"/>
         <activity android:name=".views.AboutActivity" android:exported="false" android:label="אודות ADB SMART"/>
