@@ -146,11 +146,13 @@ object AppBackupManager {
                 val deviceBase = "/data/user_de/$userId"
                 val devicePath = "$deviceBase/$packageName"
                 val deviceTar = File(work, "private-device.tar")
-                tryRootTar(
+                val devicePayload = tryRootTar(
                     deviceTar,
                     "tar -C ${quote(deviceBase)} -cpf - ${quote(packageName)}",
                     "private_device", devicePath
-                )?.let { payloads += it }
+                )
+                if (devicePayload != null) payloads += devicePayload
+                else notes += "נתוני Device Protected לא נכללו: לא ניתן היה לקרוא אותם גם עם Root."
             }
 
             val sharedPaths = listOf(
@@ -168,8 +170,16 @@ object AppBackupManager {
                     payloads += first
                 } else if (rootAvailable) {
                     val rootTar = File(work, "root-$name")
-                    tryRootTar(rootTar, "if [ -d ${quote(path)} ]; then $plain; else exit 44; fi",
-                        type, path)?.let { payloads += it }
+                    val rootPayload = tryRootTar(
+                        rootTar,
+                        "if [ -d ${quote(path)} ]; then $plain; else exit 44; fi",
+                        type,
+                        path
+                    )
+                    if (rootPayload != null) payloads += rootPayload
+                    else notes += "$type לא נכלל: Android לא אפשר לקרוא את התיקייה."
+                } else {
+                    notes += "$type לא נכלל: נדרשת גישה לתיקייה דרך ADB או Root."
                 }
             }
 
