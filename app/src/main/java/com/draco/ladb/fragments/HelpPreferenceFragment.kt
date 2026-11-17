@@ -75,7 +75,7 @@ class HelpPreferenceFragment : PreferenceFragmentCompat() {
         try {
             startActivity(intent)
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.w("HelpPreference", "Could not open help URL", e)
             Snackbar.make(requireView(), getString(R.string.snackbar_intent_failed), Snackbar.LENGTH_SHORT).show()
         }
     }
