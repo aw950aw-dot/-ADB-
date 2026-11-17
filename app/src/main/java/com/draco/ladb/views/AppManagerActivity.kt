@@ -256,9 +256,10 @@ class AppManagerActivity : AppCompatActivity() {
             val outcome = withContext(Dispatchers.IO) {
                 runCatching {
                     val userResult = adb.executeShell("am get-current-user", 15)
+                    if (userResult.exitCode != 0) error("לא ניתן לזהות את המשתמש הפעיל במכשיר.")
                     val userId = userResult.output.lineSequence()
                         .mapNotNull { it.trim().toIntOrNull() }
-                        .lastOrNull() ?: 0
+                        .lastOrNull() ?: error("Android לא החזיר מזהה משתמש תקין; הפעולה בוטלה.")
                     val command = when (mode) {
                         Mode.REMOVE -> "pm uninstall --user $userId ${entry.packageName}"
                         Mode.DISABLE -> "pm disable-user --user $userId ${entry.packageName}"
