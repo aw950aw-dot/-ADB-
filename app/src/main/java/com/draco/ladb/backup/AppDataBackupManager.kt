@@ -78,7 +78,8 @@ object AppDataBackupManager {
                 val iv = ByteArray(IV_SIZE).also { input.readFully(it) }
                 val decrypted = CipherInputStream(input, cipher(password, salt, iv, Cipher.DECRYPT_MODE))
                 ZipInputStream(BufferedInputStream(decrypted)).use { zip ->
-                    val seen = mutableSetOf<String>()
+                    val seenFiles = mutableSetOf<String>()
+                    val seenDirectories = mutableSetOf<String>()
                     var count = 0
                     var totalBytes = 0L
                     while (true) {
@@ -98,14 +99,25 @@ object AppDataBackupManager {
                         require(top in setOf("shared_prefs", "databases", "files", "no_backup", "external_files", "api_keys.json", "meta.json")) {
                             "קובץ הגיבוי מכיל רכיב לא מוכר."
                         }
-                        require(seen.add(name)) { "קובץ הגיבוי מכיל פריט כפול: $name" }
                         val target = File(staging, name)
                         require(target.canonicalPath.startsWith(staging.canonicalPath + File.separator)) {
                             "נתיב שחזור לא בטוח."
                         }
                         if (entry.isDirectory) {
-                            target.mkdirs()
+                            require(name !in seenFiles) { "נתיב ZIP מוגדר גם כקובץ וגם כתיקייה: $name" }
+                            if (seenDirectories.add(name)) target.mkdirs()
                         } else {
+                            require(name !in seenDirectories && seenFiles.add(name)) {
+                                "קובץ הגיבוי מכיל קובץ כפול: $name"
+                            }
+                            var parent = target.parentFile
+                            while (parent != null && parent != staging) {
+                                val parentName = parent.relativeTo(staging).invariantSeparatorsPath
+                                require(parentName !in seenFiles) {
+                                    "נתיב ZIP מנסה ליצור תיקייה בתוך קובץ: $parentName"
+                                }
+                                parent = parent.parentFile
+                            }
                             target.parentFile?.mkdirs()
                             FileOutputStream(target).use { output ->
                                 val buffer = ByteArray(64 * 1024)
