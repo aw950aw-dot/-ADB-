@@ -530,7 +530,9 @@ object AppBackupManager {
 
     private fun currentUserId(adb: ADB): Int {
         val result = adb.executeShell("am get-current-user", 20)
-        return result.output.lineSequence().mapNotNull { it.trim().toIntOrNull() }.lastOrNull() ?: 0
+        require(result.exitCode == 0) { "לא ניתן לזהות את המשתמש הפעיל במכשיר." }
+        return result.output.lineSequence().mapNotNull { it.trim().toIntOrNull() }.lastOrNull()
+            ?: error("Android לא החזיר מזהה משתמש תקין; הגיבוי או השחזור נעצרו כדי למנוע גישה לנתוני משתמש אחר.")
     }
 
     private fun getPackageInfo(pm: PackageManager, packageName: String): PackageInfo {
