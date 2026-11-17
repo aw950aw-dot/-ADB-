@@ -273,7 +273,7 @@ class DashboardActivity : AppCompatActivity() {
     private fun updateConnection(connected: Boolean) {
         if (!::connection.isInitialized) return
         connection.text = if (connected) "●  ADB מחובר — המכשיר מוכן לפקודות"
-            else "○  ADB ממתין לחיבור — אפשר להזין קוד מההתראה"
+            else "○  ADB ממתין לחיבור — פתח מסך צימוד כדי להתחיל"
         connection.setTextColor(if (connected) Color.rgb(110, 231, 183) else Color.rgb(253, 186, 116))
         connection.background = rounded(
             if (connected) Color.rgb(17, 49, 48) else palette.surfaceAlt, dp(14), palette.outline
