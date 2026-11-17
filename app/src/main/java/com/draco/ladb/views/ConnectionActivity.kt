@@ -29,7 +29,6 @@ import com.draco.ladb.utils.PairingNotification
 import com.draco.ladb.services.PairingService
 import com.draco.ladb.services.PairingDiscoveryService
 import androidx.core.content.ContextCompat
-import com.draco.ladb.utils.PairingPortDiscovery
 import com.draco.ladb.utils.UiTheme
 import com.draco.ladb.utils.UiComponents
 
@@ -253,10 +252,6 @@ class ConnectionActivity : AppCompatActivity() {
         page.addView(scroll, LinearLayout.LayoutParams(-1, -1))
         setContentView(page)
         UiComponents.applySystemBars(this, page, palette)
-    }
-
-    private fun showPairingNotification() {
-        startPairingDiscovery()
     }
 
     private fun openDeveloperSettings() {
