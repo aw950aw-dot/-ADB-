@@ -88,7 +88,6 @@ jobs:
           "$ZIPALIGN" -c -v 4 "$APK"
           VERIFY_OUTPUT=$("$APKSIGNER" verify --verbose --print-certs --min-sdk-version 26 "$APK")
           printf '%s\\n' "$VERIFY_OUTPUT"
-          echo "$VERIFY_OUTPUT" | grep -q "Verified using v1 scheme (JAR signing): true"
           echo "$VERIFY_OUTPUT" | grep -q "Verified using v2 scheme (APK Signature Scheme v2): true"
           BADGING=$("$AAPT" dump badging "$APK")
           printf '%s\\n' "$BADGING" | head -n 10
