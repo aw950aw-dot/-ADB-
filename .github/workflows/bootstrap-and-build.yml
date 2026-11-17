@@ -78,50 +78,39 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew assembleRelease --stacktrace
-      - name: Apply final Android-compatible APK signature and verify package
-        env:
-          ADB_SMART_KEYSTORE_PATH: ${{ env.ADB_SMART_KEYSTORE_PATH }}
-          ADB_SMART_STORE_PASSWORD: ${{ secrets.ADB_SMART_STORE_PASSWORD }}
-          ADB_SMART_KEY_ALIAS: ${{ secrets.ADB_SMART_KEY_ALIAS }}
-          ADB_SMART_KEY_PASSWORD: ${{ secrets.ADB_SMART_KEY_PASSWORD }}
+      - name: Verify APK alignment, signature and Android metadata
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          ZIPALIGN="$ANDROID_HOME/build-tools/36.0.0/zipalign"
           test -s "$APK"
-          if [ -n "$ADB_SMART_KEYSTORE_PATH" ]; then
-            SIGNING_STORE="$ADB_SMART_KEYSTORE_PATH"
-            STORE_PASS="$ADB_SMART_STORE_PASSWORD"
-            KEY_ALIAS="$ADB_SMART_KEY_ALIAS"
-            KEY_PASS="$ADB_SMART_KEY_PASSWORD"
-          else
-            SIGNING_STORE="$HOME/.android/debug.keystore"
-            STORE_PASS="android"
-            KEY_ALIAS="androiddebugkey"
-            KEY_PASS="android"
-          fi
-          "$APKSIGNER" sign \
-            --ks "$SIGNING_STORE" \
-            --ks-pass "pass:$STORE_PASS" \
-            --ks-key-alias "$KEY_ALIAS" \
-            --key-pass "pass:$KEY_PASS" \
-            --min-sdk-version 1 \
-            --v1-signing-enabled true \
-            --v2-signing-enabled true \
-            "$APK"
-          V1_VERIFY_OUTPUT=$("$APKSIGNER" verify --verbose --min-sdk-version 1 "$APK")
-          printf '%s\n' "$V1_VERIFY_OUTPUT"
-          echo "$V1_VERIFY_OUTPUT" | grep -q "Verified using v1 scheme (JAR signing): true"
-          VERIFY_OUTPUT=$("$APKSIGNER" verify --verbose --print-certs "$APK")
-          printf '%s\n' "$VERIFY_OUTPUT"
+          "$ZIPALIGN" -c -v 4 "$APK"
+          VERIFY_OUTPUT=$("$APKSIGNER" verify --verbose --print-certs --min-sdk-version 26 "$APK")
+          printf '%s\\n' "$VERIFY_OUTPUT"
+          echo "$VERIFY_OUTPUT" | grep -q "Verified using v1 scheme (JAR signing): true"
           echo "$VERIFY_OUTPUT" | grep -q "Verified using v2 scheme (APK Signature Scheme v2): true"
           BADGING=$("$AAPT" dump badging "$APK")
-          printf '%s\n' "$BADGING" | head -n 8
-          echo "$BADGING" | grep -q "package: name='com.aw950aw.adbsmart' versionCode='14' versionName='1.9.4'"
+          printf '%s\\n' "$BADGING" | head -n 10
+          echo "$BADGING" | grep -q "package: name='com.aw950aw.adbsmart' versionCode='15' versionName='1.9.5'"
+          echo "$BADGING" | grep -q "sdkVersion:'26'"
+          echo "$BADGING" | grep -q "targetSdkVersion:'33'"
           sha256sum "$APK"
+      - name: Install APK on Android 13 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            adb install app/build/outputs/apk/release/app-release.apk
+            adb shell pm path com.aw950aw.adbsmart
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: adb-smart-1.9.4-installable
+          name: adb-smart-1.9.5-installable
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
