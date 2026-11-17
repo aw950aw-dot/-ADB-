@@ -21,6 +21,7 @@ class PairingService : Service() {
     companion object {
         const val EXTRA_PAIRING_CODE = "pairing_code"
         const val EXTRA_PAIRING_PORT = "pairing_port"
+        const val EXTRA_PAIRING_HOST = "pairing_host"
         private const val TAG = "PairingService"
         private const val STATE_PREFS = "pairing_state"
     }
@@ -38,6 +39,7 @@ class PairingService : Service() {
             .orEmpty()
         val rawPort = intent?.getStringExtra(EXTRA_PAIRING_PORT).orEmpty()
         val requestedPort = rawPort.takeIf { it.isNotBlank() }?.toIntOrNull()
+        val requestedHost = intent?.getStringExtra(EXTRA_PAIRING_HOST)
 
         if (code.length != 6) {
             PairingNotification.show(this, "קוד השיוך אינו תקין. יש להזין בדיוק 6 ספרות.")
@@ -62,6 +64,7 @@ class PairingService : Service() {
             putLong("started_at", System.currentTimeMillis())
         }
 
+        PairingNotification.cancel(this)
         try {
             startForeground(
                 PairingNotification.WORKING_NOTIFICATION_ID,
@@ -87,7 +90,7 @@ class PairingService : Service() {
         }
 
         Thread {
-            runPairing(code, requestedPort)
+            runPairing(code, requestedPort, requestedHost)
         }.apply {
             isDaemon = true
             name = "WirelessPairingService"
@@ -96,20 +99,21 @@ class PairingService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun runPairing(code: String, requestedPort: Int?) {
+    private fun runPairing(code: String, requestedPort: Int?, requestedHost: String?) {
         var paired = false
         var connected = false
         var resultMessage = "השיוך והחיבור לא הושלמו."
         try {
-            val pairingPort = requestedPort
-                ?: PairingPortDiscovery(applicationContext).findPairingPort(35_000L)
-                ?: error(
-                    "לא נמצא פורט שיוך. השאר את חלון „שיוך באמצעות קוד” פתוח, " +
-                        "או חזור לאפליקציה והזן את הפורט ידנית."
-                )
+            val discovered = if (requestedPort == null) {
+                PairingPortDiscovery(applicationContext).findPairingEndpoint(15_000L)
+            } else null
+            val pairingPort = requestedPort ?: discovered?.port ?: error(
+                "לא נמצא פורט שיוך. פתח את חלון „שיוך באמצעות קוד” ונסה שוב."
+            )
+            val pairingHost = requestedHost ?: discovered?.host ?: "localhost"
 
             val adb = ADB.getInstance(applicationContext)
-            if (!adb.pair(pairingPort.toString(), code)) {
+            if (!adb.pair(pairingPort.toString(), code, pairingHost)) {
                 error("השיוך נכשל. בדוק שהקוד עדיין בתוקף ונסה שוב.")
             }
             paired = true
