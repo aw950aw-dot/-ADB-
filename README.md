@@ -32,7 +32,7 @@ Root נדרש לגיבוי או לשחזור נתונים פרטיים של אפ
 ## בנייה
 ה־workflow בשם Build release APK מופעל בכל push ל־main או ידנית דרך GitHub Actions. הוא מריץ בדיקות יחידה, Android Lint ו־`./gradlew assembleRelease`, ומעלה APK כ־Artifact בשם `ladb-hebrew-ai-release`.
 
-לחתימת עדכונים קבועה יש להגדיר ב־GitHub Actions את הסודות `ADB_SMART_KEYSTORE_BASE64`, `ADB_SMART_STORE_PASSWORD`, `ADB_SMART_KEY_ALIAS` ו־`ADB_SMART_KEY_PASSWORD`. ללא הסודות האלה הבנייה משתמשת במפתח Debug זמני, ולכן אין להניח שאפשר להתקין את ה־APK מעל התקנה קודמת.
+לחתימת Release קבועה ומאובטחת יש להגדיר ב־GitHub Actions את הסודות `ADB_SMART_KEYSTORE_BASE64`, `ADB_SMART_STORE_PASSWORD`, `ADB_SMART_KEY_ALIAS` ו־`ADB_SMART_KEY_PASSWORD`. ללא הסודות האלה הבנייה משתמשת במפתח Debug שנשמר ב־GitHub Actions Cache כדי לשמור על חתימה עקבית בבניות הבאות. APK ישן שנבנה לפני הפעלת המטמון עשוי עדיין לדרוש התקנה מחדש.
 
 ## רישוי
 מנוע LADB מבוסס על הפרויקט של Tyler Nijmeh. יש לשמור על הודעות זכויות היוצרים, הרישיון המקורי ורישיונות התלויות.
