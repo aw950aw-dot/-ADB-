@@ -484,7 +484,7 @@ class ADB(private val context: Context) {
             }.apply { isDaemon = true; name = "ADBPairOutput"; start() }
 
             // The bundled adb client prints its interactive prompt asynchronously.
-            Thread.sleep(1_500)
+            Thread.sleep(4_000)
             activeProcess.outputStream.bufferedWriter().use { writer ->
                 writer.write(pairingCode)
                 writer.newLine()
