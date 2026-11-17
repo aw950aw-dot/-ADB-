@@ -21,6 +21,7 @@ class PairingService : Service() {
     }
 
     @Volatile private var workStarted = false
+    @Volatile private var latestStartId = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -29,24 +30,34 @@ class PairingService : Service() {
             ?.filter { it in '0'..'9' }
             .orEmpty()
         if (code.length != 6) {
-            stopSelf(startId)
+            PairingNotification.show(this, "קוד השיוך אינו תקין. יש להזין 6 ספרות.")
+            if (!workStarted) stopSelfResult(startId)
             return START_NOT_STICKY
         }
 
+        latestStartId = startId
         if (!workStarted) {
             workStarted = true
-            startForeground(
-                PairingNotification.WORKING_NOTIFICATION_ID,
-                PairingNotification.workingNotification(this)
-            )
+            try {
+                startForeground(
+                    PairingNotification.WORKING_NOTIFICATION_ID,
+                    PairingNotification.workingNotification(this)
+                )
+            } catch (error: Exception) {
+                workStarted = false
+                Log.e(TAG, "Could not start pairing foreground service", error)
+                PairingNotification.show(this, "Android לא אפשר להפעיל את שירות השיוך. פתח את האפליקציה ונסה שוב.")
+                stopSelfResult(startId)
+                return START_NOT_STICKY
+            }
             Thread {
-                runPairing(code, startId)
+                runPairing(code)
             }.apply { isDaemon = true; name = "WirelessPairingService" }.start()
         }
         return START_NOT_STICKY
     }
 
-    private fun runPairing(code: String, startId: Int) {
+    private fun runPairing(code: String) {
         try {
             val port = PairingPortDiscovery(applicationContext).findPairingPort(25_000L)
                 ?: error("לא נמצא פורט שיוך. השאר את חלון „שיוך באמצעות קוד” פתוח ונסה שוב.")
@@ -79,7 +90,7 @@ class PairingService : Service() {
         } finally {
             PairingNotification.cancelWorking(applicationContext)
             stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf(startId)
+            stopSelfResult(latestStartId)
         }
     }
 }
