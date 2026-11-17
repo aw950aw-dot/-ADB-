@@ -122,45 +122,60 @@ class PairingService : Service() {
                 putBoolean(getString(R.string.paired_key), true)
             }
 
-            // A pairing port is not the ADB connection port. Start a fresh
-            // _adb-tls-connect discovery and require a real connect endpoint.
-            val nsd = getSystemService(NSD_SERVICE) as NsdManager
-            val discovery = DnsDiscover.getInstance(applicationContext, nsd)
-            discovery.stopScan()
-            discovery.scanAdbPorts()
-            val connectPort = waitForConnectPort(12_000L)
-                ?: error(
-                    "השיוך הצליח, אך Android לא פרסם פורט חיבור ADB. " +
-                        "השאר את Wireless Debugging פעיל ונסה להתחבר מחדש."
-                )
-            Log.i(TAG, "Found ADB TLS connect port $connectPort")
+            // The TLS connect advertisement can already exist before the temporary
+            // pairing dialog opens. Preserve it instead of stopping and resetting mDNS.
+            var connectEndpoint = DnsDiscover.currentEndpoint()
+            if (connectEndpoint == null) {
+                val nsd = getSystemService(NSD_SERVICE) as NsdManager
+                DnsDiscover.getInstance(applicationContext, nsd).scanAdbPorts()
+                connectEndpoint = waitForConnectEndpoint(15_000L)
+            }
+            val endpoint = connectEndpoint ?: error(
+                "השיוך הצליח, אך לא נמצאה כתובת שירות ADB לחיבור. " +
+                    "השאר את Wireless Debugging פעיל, כבה והפעל אותו מחדש, ונסה שוב."
+            )
+            Log.i(TAG, "Found ADB TLS connect endpoint ${endpoint.serial} (${endpoint.serviceName})")
 
-            val initialized = adb.initServer(skipWirelessReset = true)
+            var initialized = adb.initServer(
+                skipWirelessReset = true,
+                connectEndpointOverride = endpoint
+            )
             if (!initialized) {
-                error(
-                    "השיוך הצליח, אבל הפעלת ADB נכשלה. " +
-                        "נמצא פורט חיבור $connectPort אך לא התקבל התקן ADB מאושר."
-                )
+                // One fresh mDNS attempt covers devices that rotate their TLS port
+                // immediately after pairing. Do not restart the pairing session.
+                DnsDiscover.stopScan()
+                val nsd = getSystemService(NSD_SERVICE) as NsdManager
+                DnsDiscover.getInstance(applicationContext, nsd).scanAdbPorts()
+                val refreshed = waitForConnectEndpoint(10_000L)
+                if (refreshed != null && refreshed.serial != endpoint.serial) {
+                    initialized = adb.initServer(
+                        skipWirelessReset = true,
+                        connectEndpointOverride = refreshed
+                    )
+                }
+                if (!initialized) {
+                    error(
+                        "השיוך הצליח, אך החיבור ל־${refreshed?.serial ?: endpoint.serial} נכשל. " +
+                            "בדוק ש-Wireless Debugging עדיין פעיל ונסה שוב. " +
+                            "פלט ADB אחרון: ${adb.outputBufferFile.readText().takeLast(900)}"
+                    )
+                }
             }
 
-            // initServer can also run in non-ADB-shell mode. Verify an authorized
-            // device explicitly before reporting the connection as successful.
             val devices = adb.getDevices()
-            val localDevices = devices.filter {
+            val expectedSerial = connectEndpoint?.serial
+            val connectedDevice = devices.firstOrNull {
+                expectedSerial != null && it.equals(expectedSerial, ignoreCase = true)
+            } ?: devices.firstOrNull {
                 it.startsWith("localhost:") || it.startsWith("127.0.0.1:")
-            }
-            if (localDevices.isEmpty()) {
-                error(
-                    "השיוך הצליח, אך לא נמצא התקן ADB מקומי מאושר. " +
-                        "החיבור לפורט $connectPort לא הושלם. התקנים שנמצאו: " +
-                        devices.joinToString(", ").ifBlank { "אין" }
-                )
-            }
+            } ?: error(
+                "השיוך הצליח, אך ADB לא דיווח על ההתקן שחובר. התקנים שאושרו: " +
+                    devices.joinToString(", ").ifBlank { "אין" }
+            )
 
             connected = true
             adb.ensureShellDeathMonitor()
-            resultMessage = "השיוך והחיבור ל־ADB הושלמו. התקן מקומי מאושר: " +
-                localDevices.joinToString(", ")
+            resultMessage = "השיוך והחיבור ל־ADB הושלמו: $connectedDevice"
             PairingNotification.showResult(applicationContext, true, resultMessage)
         } catch (error: Exception) {
             Log.e(TAG, "Wireless Debugging pairing/connection failed", error)
@@ -189,11 +204,10 @@ class PairingService : Service() {
         }
     }
 
-    private fun waitForConnectPort(timeoutMillis: Long): Int? {
+    private fun waitForConnectEndpoint(timeoutMillis: Long): com.draco.ladb.utils.AdbConnectEndpoint? {
         val deadline = System.currentTimeMillis() + timeoutMillis.coerceAtLeast(1_000L)
         while (System.currentTimeMillis() < deadline) {
-            val port = DnsDiscover.adbPort
-            if (port != null && port in 1..65535) return port
+            DnsDiscover.currentEndpoint()?.let { return it }
             try {
                 Thread.sleep(200L)
             } catch (interrupted: InterruptedException) {
@@ -201,6 +215,6 @@ class PairingService : Service() {
                 return null
             }
         }
-        return DnsDiscover.adbPort?.takeIf { it in 1..65535 }
+        return DnsDiscover.currentEndpoint()
     }
 }
