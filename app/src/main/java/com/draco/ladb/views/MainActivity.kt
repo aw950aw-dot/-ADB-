@@ -96,7 +96,6 @@ class MainActivity : AppCompatActivity() {
                 addView(LinearLayout(this@MainActivity).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    layoutDirection = View.LAYOUT_DIRECTION.RTL
                     pair.forEachIndexed { index, entry ->
                         val color = listOf(Color.rgb(28,125,205),Color.rgb(20,150,135),Color.rgb(109,89,190),Color.rgb(210,126,37))[(rowIndex*2+index)%4]
                         addView(tile(entry.first,color,entry.second),
