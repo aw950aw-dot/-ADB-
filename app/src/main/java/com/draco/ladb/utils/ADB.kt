@@ -412,14 +412,14 @@ class ADB(private val context: Context) {
      */
     fun pair(port: String, pairingCode: String): Boolean {
         val numericPort = port.toIntOrNull()
-        if (numericPort !in 1..65535 || !pairingCode.matches(Regex("\\d{6}"))) return false
+        if (numericPort == null || numericPort !in 1..65535 || !pairingCode.matches(Regex("\\d{6}"))) return false
 
         tryingToPair = true
         var pairProcess: Process? = null
         try {
             // Drain ADB output while it is running. Waiting before reading can fill the pipe
             // and make the pairing process appear to hang.
-            pairProcess = ProcessBuilder(adbPath, "pair", "localhost:$numericPort")
+            val activeProcess = ProcessBuilder(adbPath, "pair", "localhost:$numericPort")
                 .directory(context.filesDir)
                 .redirectErrorStream(true)
                 .apply {
@@ -427,11 +427,12 @@ class ADB(private val context: Context) {
                     environment().put("TMPDIR", context.cacheDir.path)
                 }
                 .start()
+            pairProcess = activeProcess
 
             val captured = StringBuilder()
             val outputReader = Thread {
                 runCatching {
-                    pairProcess.inputStream.bufferedReader().useLines { lines ->
+                    activeProcess.inputStream.bufferedReader().useLines { lines ->
                         lines.forEach { line ->
                             synchronized(captured) { captured.append(line).append('\n') }
                             debug("ADB PAIR: $line")
@@ -442,22 +443,22 @@ class ADB(private val context: Context) {
 
             // The bundled adb client prints its interactive prompt asynchronously.
             Thread.sleep(1_500)
-            pairProcess.outputStream.bufferedWriter().use { writer ->
+            activeProcess.outputStream.bufferedWriter().use { writer ->
                 writer.write(pairingCode)
                 writer.newLine()
                 writer.flush()
             }
 
-            val finished = pairProcess.waitFor(20, TimeUnit.SECONDS)
+            val finished = activeProcess.waitFor(20, TimeUnit.SECONDS)
             if (!finished) {
-                pairProcess.destroyForcibly()
-                pairProcess.waitFor(2, TimeUnit.SECONDS)
+                activeProcess.destroyForcibly()
+                activeProcess.waitFor(2, TimeUnit.SECONDS)
                 debug("ADB pairing timed out.")
                 return false
             }
             outputReader.join(2_000)
             val outputText = synchronized(captured) { captured.toString() }
-            val success = pairProcess.exitValue() == 0 &&
+            val success = activeProcess.exitValue() == 0 &&
                 outputText.contains("success", ignoreCase = true)
             if (!success) debug("ADB pairing failed: " + outputText.takeLast(1200))
             return success
