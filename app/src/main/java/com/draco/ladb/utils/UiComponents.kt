@@ -48,7 +48,7 @@ object UiComponents {
                minHeightDp: Int = 48, maxLines: Int = 2,
                onClick: () -> Unit): TextView = TextView(context).apply {
         text = label
-        textSize = 14f
+        textSize = if (maxLines > 1) 13f else 14f
         typeface = android.graphics.Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER
         includeFontPadding = false
@@ -57,6 +57,7 @@ object UiComponents {
         minHeight = dp(context, minHeightDp.coerceAtLeast(44))
         minWidth = 0
         this.maxLines = maxLines.coerceIn(1, 2)
+        setLineSpacing(dp(context, 1).toFloat(), 1f)
         ellipsize = android.text.TextUtils.TruncateAt.END
         textAlignment = View.TEXT_ALIGNMENT_CENTER
         background = surface(context, backgroundColor, 14, outlineColor, clickable = true)
