@@ -48,13 +48,32 @@ class DnsDiscover private constructor(
         bestExpirationTime = null
         bestServiceName = null
         pendingNames.clear()
-        pendingResolves.set(false)
+        // Keep ADB startup waiting while discovery is active, including the no-service case.
+        pendingResolves.set(true)
         try {
             nsdManager.discoverServices("_adb-tls-connect._tcp.", NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+            mainHandler.postDelayed({ stopScan() }, 9_000L)
         } catch (error: Exception) {
             started = false
+            pendingResolves.set(false)
             Log.e(TAG, "Could not start ADB service discovery", error)
         }
+    }
+
+    /** Stops the bounded scan so later reconnect attempts can discover a fresh port. */
+    @Synchronized
+    fun stopScan() {
+        if (!started) {
+            pendingNames.clear()
+            pendingResolves.set(false)
+            return
+        }
+        started = false
+        pendingNames.clear()
+        pendingResolves.set(false)
+        mainHandler.removeCallbacksAndMessages(null)
+        runCatching { nsdManager.stopServiceDiscovery(discoveryListener) }
+            .onFailure { Log.w(TAG, "Could not stop ADB service discovery", it) }
     }
 
     fun getLocalIpAddress(): String? = getLocalIpAddresses().firstOrNull()
@@ -175,6 +194,11 @@ class DnsDiscover private constructor(
 
         override fun onDiscoveryStopped(serviceType: String) {
             Log.d(TAG, "ADB service discovery stopped: $serviceType")
+            synchronized(this@DnsDiscover) {
+                started = false
+                pendingNames.clear()
+                pendingResolves.set(false)
+            }
         }
 
         override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
@@ -182,6 +206,7 @@ class DnsDiscover private constructor(
             pendingNames.clear()
             pendingResolves.set(false)
             synchronized(this@DnsDiscover) { started = false }
+            mainHandler.removeCallbacksAndMessages(null)
             runCatching { nsdManager.stopServiceDiscovery(this) }
         }
 
