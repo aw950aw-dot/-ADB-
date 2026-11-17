@@ -208,8 +208,14 @@ object AppBackupManager {
                 .put("payloads", payloadJson)
                 .put("notes", JSONArray(notes))
 
+            val archiveNames = listOf(MANIFEST_NAME) + apkSources.map { it.entry } + payloads.map { it.entry }
+            require(archiveNames.distinct().size == archiveNames.size) {
+                "לא ניתן ליצור גיבוי: נמצאו שמות קבצים כפולים בארכיון."
+            }
             outputFile.parentFile?.mkdirs()
-            ZipOutputStream(BufferedOutputStream(FileOutputStream(outputFile))).use { zip ->
+            val temporaryOutput = File(outputFile.parentFile, outputFile.name + ".tmp-" + UUID.randomUUID())
+            try {
+                ZipOutputStream(BufferedOutputStream(FileOutputStream(temporaryOutput))).use { zip ->
                 zip.putNextEntry(ZipEntry(MANIFEST_NAME))
                 zip.write(manifest.toString(2).toByteArray(Charsets.UTF_8))
                 zip.closeEntry()
@@ -218,11 +224,20 @@ object AppBackupManager {
                     FileInputStream(source.file).use { it.copyTo(zip, 64 * 1024) }
                     zip.closeEntry()
                 }
-                payloads.forEach { payload ->
-                    zip.putNextEntry(ZipEntry(payload.entry))
-                    FileInputStream(payload.file).use { it.copyTo(zip, 64 * 1024) }
-                    zip.closeEntry()
+                    payloads.forEach { payload ->
+                        zip.putNextEntry(ZipEntry(payload.entry))
+                        FileInputStream(payload.file).use { it.copyTo(zip, 64 * 1024) }
+                        zip.closeEntry()
+                    }
                 }
+                if (outputFile.exists() && !outputFile.delete()) {
+                    error("לא ניתן להחליף קובץ גיבוי קודם.")
+                }
+                if (!temporaryOutput.renameTo(outputFile)) {
+                    error("לא ניתן לשמור את קובץ הגיבוי הסופי.")
+                }
+            } finally {
+                temporaryOutput.delete()
             }
             return BackupSummary(
                 packageName, appLabel, outputFile, rootAvailable,
@@ -562,7 +577,9 @@ object AppBackupManager {
 
     private fun isSafeEntry(value: String): Boolean {
         if (value == MANIFEST_NAME) return true
-        if (value.startsWith("/") || value.contains("..") || value.contains('\\')) return false
+        if (value.startsWith("/") || value.contains('\\')) return false
+        val parts = value.split('/')
+        if (parts.any { it.isBlank() || it == "." || it == ".." }) return false
         return value.matches(Regex("(apk|data)/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*"))
     }
 
@@ -573,6 +590,7 @@ object AppBackupManager {
     private fun validateTarArchive(file: File, requiredTopLevel: String? = null) {
         FileInputStream(file).buffered().use { input ->
             val header = ByteArray(512)
+            val seenPaths = mutableSetOf<String>()
             var entries = 0
             var totalBytes = 0L
             while (true) {
@@ -597,6 +615,9 @@ object AppBackupManager {
                     "הגיבוי כולל קישור או סוג קובץ TAR שאינו נתמך; השחזור נעצר מטעמי בטיחות."
                 }
                 require(isSafeTarPath(path) && (path.isNotEmpty() || type == '5')) { "נתיב לא בטוח בקובץ TAR." }
+                if (path.isNotEmpty()) {
+                    require(seenPaths.add(path)) { "קובץ TAR מכיל פריט כפול: $path" }
+                }
                 if (requiredTopLevel != null && path.isNotEmpty()) {
                     require(path.substringBefore('/') == requiredTopLevel) {
                         "קובץ TAR מכיל נתיב שאינו שייך לאפליקציה שבגיבוי."
