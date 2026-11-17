@@ -8,11 +8,10 @@ import androidx.core.content.edit
 import androidx.preference.*
 import com.draco.ladb.R
 import com.draco.ladb.utils.ADB
-import com.draco.ladb.views.MainActivity
+import com.draco.ladb.views.DashboardActivity
 import com.google.android.gms.oss.licenses.OssLicensesMenuActivity
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
-import kotlin.system.exitProcess
 
 class HelpPreferenceFragment : PreferenceFragmentCompat() {
     private lateinit var adb: ADB
@@ -27,10 +26,11 @@ class HelpPreferenceFragment : PreferenceFragmentCompat() {
     }
 
     private fun restartApp() {
-        val intent = Intent(requireContext(), MainActivity::class.java)
+        val intent = Intent(requireContext(), DashboardActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
         startActivity(intent)
-        requireActivity().finishAffinity()
-        exitProcess(0)
+        requireActivity().finish()
     }
 
     override fun onPreferenceTreeClick(preference: Preference): Boolean {

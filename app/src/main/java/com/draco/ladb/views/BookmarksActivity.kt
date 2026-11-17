@@ -47,7 +47,7 @@ class BookmarksActivity : AppCompatActivity() {
 
             WindowInsetsCompat.CONSUMED
         }
-        supportActionBar!!.elevation = 0f
+        supportActionBar?.elevation = 0f
         WindowCompat.getInsetsController(window, window.decorView)
             .isAppearanceLightStatusBars = !UiTheme.isDark(this)
 

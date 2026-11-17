@@ -17,6 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.draco.ladb.backup.AppDataBackupManager
 import com.draco.ladb.utils.UiTheme
+import com.draco.ladb.utils.UiComponents
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -71,7 +72,7 @@ class AppDataBackupActivity : AppCompatActivity() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(16), dp(16), dp(16))
-            background = rounded(palette.surface, dp(17), palette.outline)
+            background = UiComponents.surface(this@AppDataBackupActivity, palette.surface, 17, palette.outline)
         }
         card.addView(text("סיסמת הגיבוי", 15, palette.text, true))
         password = field("סיסמה — לפחות 8 תווים")
@@ -112,6 +113,7 @@ class AppDataBackupActivity : AppCompatActivity() {
 
         page.addView(scroll, LinearLayout.LayoutParams(-1, -1))
         setContentView(page)
+        UiComponents.applySystemBars(this, page, palette)
     }
 
     private fun createBackup(uri: android.net.Uri) {
@@ -169,18 +171,8 @@ class AppDataBackupActivity : AppCompatActivity() {
         background = rounded(palette.inputBackground, dp(12), palette.outline)
     }
 
-    private fun button(label: String, action: () -> Unit) = TextView(this).apply {
-        text = label
-        textSize = 14f
-        typeface = Typeface.DEFAULT_BOLD
-        gravity = Gravity.CENTER
-        setTextColor(palette.text)
-        setPadding(dp(10), dp(8), dp(10), dp(8))
-        background = rounded(palette.surfaceAlt, dp(13), palette.outline)
-        isClickable = true
-        isFocusable = true
-        setOnClickListener { action() }
-    }
+    private fun button(label: String, action: () -> Unit): TextView =
+        UiComponents.button(this, label, palette.surfaceAlt, palette.text, palette.outline, 48, 2, action)
 
     private fun text(value: String, size: Int, color: Int, bold: Boolean) = TextView(this).apply {
         text = value
