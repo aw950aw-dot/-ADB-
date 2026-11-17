@@ -172,7 +172,7 @@ class ConnectionActivity : AppCompatActivity() {
             13, Color.rgb(221, 237, 251), false
         ).apply { setPadding(0, dp(8), 0, 0) })
         hero.addView(actionButton("פתח מסך צימוד אלחוטי", Color.rgb(8, 30, 54), Color.WHITE) {
-            openDeveloperSettings()
+            openWirelessPairingSettings()
         }, LinearLayout.LayoutParams(-1, dp(47)).apply { topMargin = dp(13) })
         content.addView(hero, LinearLayout.LayoutParams(-1, -2).apply {
             topMargin = dp(13)
@@ -299,7 +299,19 @@ class ConnectionActivity : AppCompatActivity() {
         }
 
         try {
-            // Fallback for OEM Settings apps that do not expose the direct action.
+            // Some vendor Settings versions expose the Wireless Debugging page separately.
+            val wirelessSettingsIntent = Intent("android.settings.WIRELESS_DEBUGGING_SETTINGS")
+            if (wirelessSettingsIntent.resolveActivity(packageManager) != null) {
+                startActivity(wirelessSettingsIntent)
+                status.text = "נפתח מסך Wireless Debugging. הפעל אותו ובחר „שיוך מכשיר באמצעות קוד”."
+                return
+            }
+        } catch (error: Exception) {
+            Log.w("ConnectionActivity", "Direct Wireless Debugging settings page is unavailable", error)
+        }
+
+        try {
+            // Fallback for OEM Settings apps that do not expose a direct wireless entry point.
             val settingsIntent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT
             }
