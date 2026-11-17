@@ -212,32 +212,42 @@ object AppBackupManager {
             require(archiveNames.distinct().size == archiveNames.size) {
                 "לא ניתן ליצור גיבוי: נמצאו שמות קבצים כפולים בארכיון."
             }
-            outputFile.parentFile?.mkdirs()
-            val temporaryOutput = File(outputFile.parentFile, outputFile.name + ".tmp-" + UUID.randomUUID())
+            val outputParent = outputFile.parentFile ?: context.cacheDir
+            if (!outputParent.exists() && !outputParent.mkdirs()) error("לא ניתן להכין תיקיית גיבוי.")
+            val temporaryOutput = File(outputParent, outputFile.name + ".tmp-" + UUID.randomUUID())
+            val previousOutput = File(outputParent, outputFile.name + ".previous-" + UUID.randomUUID())
+            var previousMoved = false
             try {
                 ZipOutputStream(BufferedOutputStream(FileOutputStream(temporaryOutput))).use { zip ->
-                zip.putNextEntry(ZipEntry(MANIFEST_NAME))
-                zip.write(manifest.toString(2).toByteArray(Charsets.UTF_8))
-                zip.closeEntry()
-                apkSources.forEach { source ->
-                    zip.putNextEntry(ZipEntry(source.entry))
-                    FileInputStream(source.file).use { it.copyTo(zip, 64 * 1024) }
+                    zip.putNextEntry(ZipEntry(MANIFEST_NAME))
+                    zip.write(manifest.toString(2).toByteArray(Charsets.UTF_8))
                     zip.closeEntry()
-                }
+                    apkSources.forEach { source ->
+                        zip.putNextEntry(ZipEntry(source.entry))
+                        FileInputStream(source.file).use { it.copyTo(zip, 64 * 1024) }
+                        zip.closeEntry()
+                    }
                     payloads.forEach { payload ->
                         zip.putNextEntry(ZipEntry(payload.entry))
                         FileInputStream(payload.file).use { it.copyTo(zip, 64 * 1024) }
                         zip.closeEntry()
                     }
                 }
-                if (outputFile.exists() && !outputFile.delete()) {
-                    error("לא ניתן להחליף קובץ גיבוי קודם.")
+                if (outputFile.exists()) {
+                    if (!outputFile.renameTo(previousOutput)) error("לא ניתן לשמור את קובץ הגיבוי הקודם.")
+                    previousMoved = true
                 }
                 if (!temporaryOutput.renameTo(outputFile)) {
+                    if (previousMoved && previousOutput.renameTo(outputFile)) previousMoved = false
                     error("לא ניתן לשמור את קובץ הגיבוי הסופי.")
+                }
+                if (previousMoved) {
+                    previousOutput.delete()
+                    previousMoved = false
                 }
             } finally {
                 temporaryOutput.delete()
+                if (previousMoved && !outputFile.exists()) previousOutput.renameTo(outputFile)
             }
             return BackupSummary(
                 packageName, appLabel, outputFile, rootAvailable,
