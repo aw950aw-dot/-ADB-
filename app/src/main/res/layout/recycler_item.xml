@@ -28,7 +28,7 @@
             android:contentDescription="@string/delete"
             android:padding="11dp"
             android:src="@drawable/ic_baseline_delete_24"
-            android:tint="?attr/colorOnSurface" />
+            app:tint="?attr/colorOnSurface" />
 
         <ImageButton
             android:id="@+id/edit"
@@ -38,7 +38,7 @@
             android:contentDescription="@string/edit"
             android:padding="11dp"
             android:src="@drawable/ic_baseline_edit_24"
-            android:tint="?attr/colorOnSurfaceVariant" />
+            app:tint="?attr/colorOnSurfaceVariant" />
 
         <TextView
             android:id="@+id/content"
