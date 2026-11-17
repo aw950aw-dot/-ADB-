@@ -44,7 +44,7 @@ class PairingService : Service() {
             if (!workStarted) stopSelfResult(startId)
             return START_NOT_STICKY
         }
-        if (rawPort.isNotBlank() && requestedPort !in 1..65535) {
+        if (rawPort.isNotBlank() && (requestedPort == null || requestedPort !in 1..65535)) {
             PairingNotification.show(this, "הפורט שהוזן אינו תקין. יש להזין מספר בין 1 ל־65535.")
             if (!workStarted) stopSelfResult(startId)
             return START_NOT_STICKY
