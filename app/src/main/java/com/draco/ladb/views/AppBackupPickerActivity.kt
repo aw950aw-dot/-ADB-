@@ -39,6 +39,7 @@ class AppBackupPickerActivity : AppCompatActivity() {
     private var apps: List<AppBackupManager.AppItem> = emptyList()
     private var pendingPackage: String? = null
     private var reloadGeneration = 0
+    private val iconCache = object : android.util.LruCache<String, android.graphics.drawable.Drawable>(72) {}
     private val searchHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val filterRunnable = Runnable { renderApps() }
 
@@ -203,8 +204,10 @@ class AppBackupPickerActivity : AppCompatActivity() {
             setOnClickListener { prepareBackup(app) }
         }
         val icon = ImageView(this).apply {
-            try { setImageDrawable(packageManager.getApplicationIcon(app.applicationInfo)) }
-            catch (_: Exception) { setImageResource(android.R.drawable.sym_def_app_icon) }
+            val cached = iconCache.get(app.packageName) ?: runCatching {
+                packageManager.getApplicationIcon(app.applicationInfo)
+            }.getOrNull()?.also { iconCache.put(app.packageName, it) }
+            setImageDrawable(cached ?: getDrawable(android.R.drawable.sym_def_app_icon))
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
         card.addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)))
