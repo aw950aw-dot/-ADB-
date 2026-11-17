@@ -161,7 +161,7 @@ class SettingsActivity : AppCompatActivity() {
             })
         })
 
-        root.addView(heading("ספקי בינה מלאכותית ומפתחות API"))
+        root.addView(heading("ספקי AI ומפתחות API"))
 
         val keys = linkedMapOf<String, EditText>()
         val providerFields = listOf(
@@ -259,7 +259,7 @@ class SettingsActivity : AppCompatActivity() {
             addView(TextView(this@SettingsActivity).apply {
                 text = "אפשר להוסיף כמה מזהי מודלים מאותו ספק. האפליקציה תנסה אותם לפי הסדר."
                 textSize = 12f
-                setTextColor(Color.rgb(85, 105, 130))
+                setTextColor(palette.muted)
                 gravity = Gravity.RIGHT
             })
             addView(extraModels)
@@ -281,7 +281,7 @@ class SettingsActivity : AppCompatActivity() {
         })
 
         root.addView(Button(this).apply {
-            text = "שמירת הגדרות AI"
+            text = "שמירת הגדרות"
             isAllCaps = false
             setOnClickListener {
                 val chosenPrimaryProvider = selectedProvider(primaryProvider)
@@ -332,7 +332,7 @@ class SettingsActivity : AppCompatActivity() {
                 gravity = Gravity.RIGHT
             })
             addView(Button(this@SettingsActivity).apply {
-                text = "פתח גיבוי ושחזור נתוני האפליקציה"
+                text = "גיבוי או שחזור נתוני האפליקציה"
                 isAllCaps = false
                 setOnClickListener {
                     startActivity(Intent(this@SettingsActivity, AppDataBackupActivity::class.java))
