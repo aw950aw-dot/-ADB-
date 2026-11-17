@@ -283,7 +283,7 @@ class ADB(private val context: Context) {
             sendToShellProcess("echo 'Entered non-adb shell'")
 
         val startupCommand =
-            sharedPrefs.getString(context.getString(R.string.startup_command_key), "echo 'Success! ※\\(^o^)/※'")!!
+            sharedPrefs.getString(context.getString(R.string.startup_command_key), "echo 'Success! ※\\(^o^)/※'") ?: ""
         if (startupCommand.isNotEmpty())
             sendToShellProcess(startupCommand)
 
@@ -590,12 +590,16 @@ class ADB(private val context: Context) {
      * Send commands directly to the shell process
      */
     fun sendToShellProcess(msg: String) {
-        if (shellProcess == null || shellProcess?.outputStream == null)
-            return
-        PrintStream(shellProcess!!.outputStream!!).apply {
-            println(msg)
-            flush()
-        }
+        val process = shellProcess ?: return
+        if (!process.isAlive) return
+        runCatching {
+            synchronized(process) {
+                PrintStream(process.outputStream).apply {
+                    println(msg)
+                    flush()
+                }
+            }
+        }.onFailure { Log.w("ADB", "Could not send command to the shell", it) }
     }
 
     /**
@@ -730,6 +734,11 @@ class ADB(private val context: Context) {
         }
         stdoutThread.join(5_000)
         stderrThread.join(5_000)
+        if (stdoutThread.isAlive || stderrThread.isAlive) {
+            process.destroyForcibly()
+            destination.delete()
+            throw IllegalStateException("העברת נתוני ADB לא הסתיימה בזמן.")
+        }
         if (process.exitValue() != 0) {
             destination.delete()
             throw IllegalStateException(errorText.toString().ifBlank { "העברת הנתונים דרך ADB נכשלה" })
@@ -777,7 +786,7 @@ class ADB(private val context: Context) {
         }
         writer.join(5_000)
         reader.join(5_000)
-        if (writer.isAlive) {
+        if (writer.isAlive || reader.isAlive) {
             process.destroyForcibly()
             throw IllegalStateException("העברת קובץ השחזור לא הסתיימה בזמן.")
         }
