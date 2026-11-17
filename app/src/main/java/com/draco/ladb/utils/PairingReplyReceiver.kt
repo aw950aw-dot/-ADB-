@@ -36,9 +36,6 @@ class PairingReplyReceiver : BroadcastReceiver() {
                 PreferenceManager.getDefaultSharedPreferences(context).edit {
                     putBoolean(context.getString(R.string.paired_key), true)
                 }
-                context.getSharedPreferences("pairing_state", Context.MODE_PRIVATE).edit {
-                    putBoolean("connect_when_resumed", true)
-                }
                 PairingNotification.showResult(
                     context,
                     true,
