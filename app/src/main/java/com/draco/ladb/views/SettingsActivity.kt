@@ -265,10 +265,10 @@ class SettingsActivity : AppCompatActivity() {
         category(root, "בינה מלאכותית", "מפתחות, מודלים וספקי AI") {
             val keys = linkedMapOf<String, EditText>()
             val providerFields = listOf(
-                Triple("gemini", "Google Gemini API Key", ApiKeyVault.read(this, "gemini")),
-                Triple("openai", "OpenAI API Key", ApiKeyVault.read(this, "openai")),
-                Triple("anthropic", "Anthropic Claude API Key", ApiKeyVault.read(this, "anthropic")),
-                Triple("custom", "מפתח API של ספק מותאם", ApiKeyVault.read(this, "custom"))
+                Triple("gemini", "Google Gemini API Key", ApiKeyVault.read(this@SettingsActivity, "gemini")),
+                Triple("openai", "OpenAI API Key", ApiKeyVault.read(this@SettingsActivity, "openai")),
+                Triple("anthropic", "Anthropic Claude API Key", ApiKeyVault.read(this@SettingsActivity, "anthropic")),
+                Triple("custom", "מפתח API של ספק מותאם", ApiKeyVault.read(this@SettingsActivity, "custom"))
             )
 
             category(this, "מפתחות API", "הזנת מפתחות לספקי הבינה המלאכותית", initiallyExpanded = true, nested = true) {
