@@ -115,7 +115,7 @@ object PairingNotification {
                 .setContentText(statusText)
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-                .setVisibility(android.app.Notification.VISIBILITY_PUBLIC)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setAutoCancel(false)
                 // Allow swipe-to-dismiss; this is not a permanent foreground notification.
                 .setOngoing(false)
