@@ -110,6 +110,10 @@ object AppDataBackupManager {
                             require(name !in seenDirectories && seenFiles.add(name)) {
                                 "קובץ הגיבוי מכיל קובץ כפול: $name"
                             }
+                            require(seenFiles.none { it.startsWith("$name/") } &&
+                                seenDirectories.none { it.startsWith("$name/") }) {
+                                "נתיב ZIP מתנגש עם פריטים שכבר קיימים: $name"
+                            }
                             var parent = target.parentFile
                             while (parent != null && parent != staging) {
                                 val parentName = parent.relativeTo(staging).invariantSeparatorsPath
