@@ -129,12 +129,9 @@ class ConnectionActivity : AppCompatActivity() {
         }
         info.addView(text("איך מתחברים", 17, palette.text, true))
         info.addView(text(
-            "1. הפעל ניפוי באגים אלחוטי באפשרויות למפתחים.
-" +
-                "2. בחר „שיוך מכשיר באמצעות קוד”.
-" +
-                "3. משוך את סרגל ההתראות, הקלד את קוד 6 הספרות בהתראה ולחץ „אישור אוטומטי”.
-" +
+            "1. הפעל ניפוי באגים אלחוטי באפשרויות למפתחים.\\n" +
+                "2. בחר „שיוך מכשיר באמצעות קוד”.\\n" +
+                "3. משוך את סרגל ההתראות, הקלד את קוד 6 הספרות בהתראה ולחץ „אישור אוטומטי”.\\n" +
                 "האפליקציה תאתר בעצמה את פורט השיוך ותבצע את החיבור.",
             13, palette.muted, false
         ).apply { setPadding(0, dp(8), 0, 0) })
@@ -224,8 +221,8 @@ class ConnectionActivity : AppCompatActivity() {
                 pairButton.isEnabled = true
                 pairButton.text = "נסה שוב"
                 status.text = result.exceptionOrNull()?.message ?: "השיוך נכשל."
-                PairingNotification.show(this)
-                Toast.makeText(this, status.text, Toast.LENGTH_LONG).show()
+                PairingNotification.show(this@ConnectionActivity)
+                Toast.makeText(this@ConnectionActivity, status.text, Toast.LENGTH_LONG).show()
             }
         }
     }
