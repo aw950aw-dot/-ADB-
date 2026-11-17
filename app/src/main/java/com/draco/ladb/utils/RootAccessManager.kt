@@ -79,6 +79,11 @@ object RootAccessManager {
         }
         stdout.join(5_000)
         stderr.join(5_000)
+        if (stdout.isAlive || stderr.isAlive) {
+            process.destroyForcibly()
+            destination.delete()
+            throw IllegalStateException("קריאת נתוני Root לא הסתיימה בזמן.")
+        }
         if (process.exitValue() != 0 || !destination.isFile || destination.length() == 0L) {
             destination.delete()
             throw IllegalStateException(errorText.toString().ifBlank { "Root לא הצליח לקרוא את תיקיית הנתונים." })
@@ -92,16 +97,32 @@ object RootAccessManager {
         val output = StringBuilder()
         val reader = Thread {
             runCatching { process.inputStream.bufferedReader().use { output.append(it.readText()) } }
-        }.apply { isDaemon = true; start() }
-        source.inputStream().use { input ->
-            process.outputStream.use { target -> input.copyTo(target, 64 * 1024) }
-        }
+        }.apply { isDaemon = true; name = "RootRestoreOutput"; start() }
+        val copyFailure = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
+        val writer = Thread {
+            try {
+                source.inputStream().use { input ->
+                    process.outputStream.use { target -> input.copyTo(target, 64 * 1024) }
+                }
+            } catch (error: Throwable) {
+                copyFailure.set(error)
+                runCatching { process.outputStream.close() }
+            }
+        }.apply { isDaemon = true; name = "RootRestoreInput"; start() }
+
         if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
             process.destroyForcibly()
+            writer.join(2_000)
             reader.join(2_000)
             throw IllegalStateException("פעולת Root לשחזור חרגה מזמן ההמתנה.")
         }
+        writer.join(5_000)
         reader.join(5_000)
+        if (writer.isAlive || reader.isAlive) {
+            process.destroyForcibly()
+            throw IllegalStateException("העברת נתוני Root לא הסתיימה בזמן.")
+        }
+        copyFailure.get()?.let { throw IllegalStateException("לא ניתן להעביר את קובץ השחזור ל־Root: ${it.message}", it) }
         if (process.exitValue() != 0) {
             throw IllegalStateException(output.toString().ifBlank { "פקודת Root לשחזור נכשלה." })
         }
