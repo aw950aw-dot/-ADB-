@@ -18,6 +18,18 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "DNS"
 
+data class AdbConnectEndpoint(
+    val host: String,
+    val port: Int,
+    val serviceName: String
+) {
+    val serial: String
+        get() {
+            val cleanHost = host.trim().removePrefix("[").removeSuffix("]")
+            return if (cleanHost.contains(":")) "[$cleanHost]:$port" else "$cleanHost:$port"
+        }
+}
+
 class DnsDiscover private constructor(
     private val context: Context,
     private val nsdManager: NsdManager
@@ -32,7 +44,16 @@ class DnsDiscover private constructor(
         @SuppressLint("StaticFieldLeak")
         @Volatile private var instance: DnsDiscover? = null
         @Volatile var adbPort: Int? = null
+        @Volatile var adbHost: String? = null
+        @Volatile var adbServiceName: String? = null
         val pendingResolves = AtomicBoolean(false)
+
+        fun currentEndpoint(): AdbConnectEndpoint? {
+            val host = adbHost?.takeIf { it.isNotBlank() } ?: return null
+            val port = adbPort?.takeIf { it in 1..65535 } ?: return null
+            val name = adbServiceName?.takeIf { it.isNotBlank() } ?: return null
+            return AdbConnectEndpoint(host, port, name)
+        }
         @Volatile var aliveTime: Long? = null
 
         fun getInstance(context: Context, nsdManager: NsdManager): DnsDiscover =
@@ -47,6 +68,8 @@ class DnsDiscover private constructor(
         started = true
         aliveTime = System.currentTimeMillis()
         adbPort = null
+        adbHost = null
+        adbServiceName = null
         bestExpirationTime = null
         bestServiceName = null
         pendingNames.clear()
@@ -110,6 +133,7 @@ class DnsDiscover private constructor(
     private fun updateIfNewest(info: NsdServiceInfo) {
         val port = info.port
         if (port !in 1..65535) return
+        val host = info.host?.hostAddress?.substringBefore('%')?.takeIf { it.isNotBlank() } ?: return
         val expiry = parseExpirationTime(info.toString())
         val name = info.serviceName.orEmpty()
         val shouldUpdate = adbPort == null ||
@@ -118,9 +142,11 @@ class DnsDiscover private constructor(
                 serviceNameRank(name) > serviceNameRank(bestServiceName.orEmpty()))
         if (shouldUpdate) {
             adbPort = port
+            adbHost = host
+            adbServiceName = name
             bestExpirationTime = expiry
             bestServiceName = name
-            Log.d(TAG, "Selected local ADB port $port ($name)")
+            Log.i(TAG, "Selected local ADB TLS endpoint $host:$port ($name)")
         }
     }
 
