@@ -60,13 +60,14 @@ jobs:
             echo "ADB_SMART_KEYSTORE_PATH=$RUNNER_TEMP/adb-smart-release.jks" >> "$GITHUB_ENV"
           fi
       - name: Build release APK
+        timeout-minutes: 12
         env:
           ADB_SMART_STORE_PASSWORD: ${{ secrets.ADB_SMART_STORE_PASSWORD }}
           ADB_SMART_KEY_ALIAS: ${{ secrets.ADB_SMART_KEY_ALIAS }}
           ADB_SMART_KEY_PASSWORD: ${{ secrets.ADB_SMART_KEY_PASSWORD }}
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleRelease --stacktrace
+          ./gradlew assembleRelease --offline --no-daemon --console=plain --stacktrace
       - name: Verify APK alignment, signature and Android metadata
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
