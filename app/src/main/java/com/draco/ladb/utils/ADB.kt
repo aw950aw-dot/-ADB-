@@ -68,9 +68,9 @@ class ADB(private val context: Context) {
      * Returns the user buffer size if valid, else the default
      */
     fun getOutputBufferSize(): Int {
-        val userValue = sharedPrefs.getString(context.getString(R.string.buffer_size_key), "524288")!!
+        val userValue = sharedPrefs.getString(context.getString(R.string.buffer_size_key), "524288") ?: "524288"
         return try {
-            Integer.parseInt(userValue)
+            Integer.parseInt(userValue).coerceIn(32 * 1024, 4 * 1024 * 1024)
         } catch (_: NumberFormatException) {
             512 * 1024
         }
@@ -80,16 +80,13 @@ class ADB(private val context: Context) {
      * Get a list of connected devices.
      */
     fun getDevices(): List<String> {
-        val devicesProcess = adb(false, listOf("devices"))
-        if (!devicesProcess.waitFor(15, TimeUnit.SECONDS)) {
-            devicesProcess.destroyForcibly()
-            throw IllegalStateException("בדיקת התקני ADB חרגה מזמן ההמתנה.")
-        }
-        val linesRaw = BufferedReader(devicesProcess.inputStream.reader()).use { it.readLines() }
-        val deviceNames = linesRaw.mapNotNull { line ->
+        val process = processForAdb(listOf("devices"), mergeError = true)
+        val (exitCode, output) = captureProcessOutput(process, 15, "בדיקת התקני ADB חרגה מזמן ההמתנה.")
+        if (exitCode != 0) throw IllegalStateException(output.ifBlank { "לא ניתן לקרוא את רשימת התקני ADB." })
+        val deviceNames = output.lineSequence().mapNotNull { line ->
             val parts = line.trim().split(Regex("\\s+"))
             if (parts.size >= 2 && parts[1] == "device") parts[0] else null
-        }
+        }.toList()
         deviceNames.forEach { Log.d("ADB", "device=$it") }
         return deviceNames
     }
@@ -191,10 +188,15 @@ class ADB(private val context: Context) {
                 debug("No ADB port discovered, fallback...")
 
             debug("Starting ADB server...")
-            adb(false, listOf("start-server")).waitFor(1, TimeUnit.MINUTES)
+            val startServer = adb(false, listOf("start-server"))
+            if (!startServer.waitFor(30, TimeUnit.SECONDS)) {
+                startServer.destroyForcibly()
+                debug("הפעלת שרת ADB חרגה מזמן ההמתנה.")
+                return false
+            }
 
             val waitProcess = if (adbPort != null)
-                adb(false, listOf("connect", "localhost:$adbPort")).waitFor(1, TimeUnit.MINUTES)
+                adb(false, listOf("connect", "localhost:$adbPort")).waitFor(30, TimeUnit.SECONDS)
             else
                 adb(false, listOf("wait-for-device")).waitFor(1, TimeUnit.MINUTES)
 
@@ -214,6 +216,11 @@ class ADB(private val context: Context) {
 
         val deviceList = getDevices()
         Log.d("DEVICES", "Devices: $deviceList")
+        if (autoShell && deviceList.isEmpty()) {
+            debug("לא נמצא התקן ADB מאושר. בדוק את חיבור Wireless Debugging ונסה שוב.")
+            _running.postValue(false)
+            return false
+        }
 
         shellProcess = if (autoShell) {
             var argList = listOf("shell")
