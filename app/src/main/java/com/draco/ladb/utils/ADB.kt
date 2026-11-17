@@ -12,7 +12,6 @@ import androidx.lifecycle.MutableLiveData
 import androidx.preference.PreferenceManager
 import com.draco.ladb.BuildConfig
 import com.draco.ladb.R
-import java.io.BufferedReader
 import java.io.File
 import java.io.PrintStream
 import java.util.concurrent.TimeUnit
@@ -189,18 +188,24 @@ class ADB(private val context: Context) {
 
             debug("Starting ADB server...")
             val startServer = adb(false, listOf("start-server"))
-            if (!startServer.waitFor(30, TimeUnit.SECONDS)) {
+            val startFinished = startServer.waitFor(30, TimeUnit.SECONDS)
+            if (!startFinished) {
                 startServer.destroyForcibly()
                 debug("הפעלת שרת ADB חרגה מזמן ההמתנה.")
                 return false
             }
 
             val waitProcess = if (adbPort != null)
-                adb(false, listOf("connect", "localhost:$adbPort")).waitFor(30, TimeUnit.SECONDS)
+                adb(false, listOf("connect", "localhost:$adbPort"))
             else
-                adb(false, listOf("wait-for-device")).waitFor(1, TimeUnit.MINUTES)
+                adb(false, listOf("wait-for-device"))
+            val waitFinished = waitProcess.waitFor(
+                if (adbPort != null) 30 else 60,
+                TimeUnit.SECONDS
+            )
 
-            if (!waitProcess) {
+            if (!waitFinished) {
+                waitProcess.destroyForcibly()
                 debug("Your device didn't connect to LADB")
                 debug("If a reboot doesn't work, please contact support")
 
