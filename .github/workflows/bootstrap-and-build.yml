@@ -33,11 +33,24 @@ jobs:
           SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)
           yes | "$SDKMANAGER" --licenses || true
           "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
-      - name: Cache debug signing key for repeatable test builds
+      - name: Restore stable debug signing key
         uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
-          key: adb-smart-debug-keystore-v1
+          key: adb-smart-debug-keystore-v2
+      - name: Create stable debug signing key when missing
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -s "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey
       - name: Prepare release signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.ADB_SMART_KEYSTORE_BASE64 }}
@@ -65,9 +78,18 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew assembleRelease --stacktrace
+      - name: Verify APK signature and package metadata
+        run: |
+          APK="app/build/outputs/apk/release/app-release.apk"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          test -s "$APK"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          "$AAPT" dump badging "$APK" | head -n 8
+          sha256sum "$APK"
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ladb-hebrew-ai-release
-          path: app/build/outputs/apk/release/*.apk
+          name: adb-smart-1.9.2-installable
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
