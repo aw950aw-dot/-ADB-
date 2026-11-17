@@ -4,7 +4,7 @@ on:
     branches: [ main ]
   workflow_dispatch:
 concurrency:
-  group: release-apk-build-196
+  group: release-apk-build-196-fast
   cancel-in-progress: true
 permissions:
   contents: read
