@@ -142,15 +142,25 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
         synchronized(file) {
             if (!file.exists()) {
                 cachedOutput = ""
+                outputStartOffset = 0L
                 lastOutputSize = -1L
+                lastOutputModified = -1L
                 return ""
             }
+
             val size = file.length()
             val modified = file.lastModified()
             if (size == lastOutputSize && modified == lastOutputModified) return cachedOutput
-            if (outputStartOffset > size) outputStartOffset = 0L
-            val requestedStart = outputStartOffset
-            val start = maxOf(requestedStart, size - maxVisibleOutputBytes)
+
+            // The output file is periodically trimmed by ADB. Detect truncation/rotation
+            // and rebuild the visible tail only when necessary.
+            if (size < lastOutputSize || (size == lastOutputSize && modified != lastOutputModified)) {
+                outputStartOffset = 0L
+                cachedOutput = ""
+            }
+
+            val tailStart = (size - maxVisibleOutputBytes).coerceAtLeast(0L)
+            val start = if (outputStartOffset < tailStart) tailStart else outputStartOffset
             val length = (size - start).coerceAtLeast(0L)
                 .coerceAtMost(maxVisibleOutputBytes.toLong()).toInt()
             val bytes = ByteArray(length)
@@ -160,10 +170,18 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
                     input.readFully(bytes)
                 }
             }
-            val content = String(bytes, Charsets.UTF_8)
-            cachedOutput = if (start > requestedStart) {
-                "… הפלט הישן קוצר כדי לשמור על תגובה מהירה. …\n$content"
-            } else content
+
+            val chunk = String(bytes, Charsets.UTF_8)
+            cachedOutput = if (start > 0L && outputStartOffset == 0L) {
+                "… הפלט הישן קוצר כדי לשמור על תגובה מהירה. …\n$chunk"
+            } else {
+                cachedOutput + chunk
+            }
+            if (cachedOutput.length > maxVisibleOutputBytes) {
+                cachedOutput = "… תחילת הפלט הוסרה …\n" + cachedOutput.takeLast(maxVisibleOutputBytes)
+            }
+
+            outputStartOffset = size
             lastOutputSize = size
             lastOutputModified = modified
             return cachedOutput
