@@ -45,22 +45,31 @@ class PairingPortDiscovery(context: Context) {
                                     val port = serviceInfo.port
                                     if (port in 1..65535) {
                                         // Ignore other phones/tablets that may advertise pairing on the same Wi-Fi.
-                                        val belongsToThisDevice = runCatching {
-                                            NetworkInterface.getNetworkInterfaces().asSequence().any { network ->
-                                                network.inetAddresses.asSequence().any { address ->
-                                                    address.hostAddress.substringBefore('%') == serviceInfo.host.hostAddress.substringBefore('%')
-                                                }
-                                            }
-                                        }.getOrDefault(false)
+                                        val serviceHost = serviceInfo.host?.hostAddress?.substringBefore('%')
+                                        val localHosts = runCatching {
+                                            val interfaces = NetworkInterface.getNetworkInterfaces()
+                                            if (interfaces == null) emptySet() else interfaces.asSequence()
+                                                .filter { it.isUp && !it.isLoopback }
+                                                .flatMap { it.inetAddresses.asSequence() }
+                                                .map { it.hostAddress.substringBefore('%') }
+                                                .toSet()
+                                        }.getOrDefault(emptySet())
+                                        val belongsToThisDevice = serviceHost != null && serviceHost in localHosts
 
-                                        // The pairing daemon owns this local port; a successful bind means it is not ours.
-                                        val portIsOccupiedLocally = try {
-                                            ServerSocket().use {
-                                                it.bind(InetSocketAddress("127.0.0.1", port), 1)
+                                        // Test the actual local interface addresses, not only loopback:
+                                        // Android may bind the pairing daemon to the Wi-Fi address.
+                                        val portIsOccupiedLocally = belongsToThisDevice && localHosts.any { host ->
+                                            try {
+                                                ServerSocket().use {
+                                                    it.reuseAddress = false
+                                                    it.bind(InetSocketAddress(host, port), 1)
+                                                    false
+                                                }
+                                            } catch (_: IOException) {
+                                                true
+                                            } catch (_: Exception) {
                                                 false
                                             }
-                                        } catch (_: IOException) {
-                                            true
                                         }
 
                                         if (belongsToThisDevice && portIsOccupiedLocally) {
