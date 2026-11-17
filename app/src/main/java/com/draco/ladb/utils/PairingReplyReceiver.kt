@@ -7,7 +7,7 @@ import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
 import com.draco.ladb.services.PairingService
 
-/** Receives the notification reply and hands the work to a foreground service. */
+/** Receives the inline code reply and passes the already-discovered pairing endpoint to ADB. */
 class PairingReplyReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != PairingNotification.ACTION_PAIR) return
@@ -26,9 +26,17 @@ class PairingReplyReceiver : BroadcastReceiver() {
         val serviceIntent = Intent(context, PairingService::class.java)
             .putExtra(PairingService.EXTRA_PAIRING_CODE, code)
 
+        val pairingPort = intent.getIntExtra(PairingNotification.EXTRA_PAIRING_PORT, 0)
+        val pairingHost = intent.getStringExtra(PairingNotification.EXTRA_PAIRING_HOST)
+        if (pairingPort in 1..65535) {
+            serviceIntent.putExtra(PairingService.EXTRA_PAIRING_PORT, pairingPort.toString())
+        }
+        if (!pairingHost.isNullOrBlank()) {
+            serviceIntent.putExtra(PairingService.EXTRA_PAIRING_HOST, pairingHost)
+        }
+
         try {
-            // Starting a foreground service from the explicit notification action
-            // keeps the pairing operation independent from every Activity/task.
+            // The code and discovered endpoint go directly to the pairing service.
             ContextCompat.startForegroundService(context, serviceIntent)
         } catch (error: Exception) {
             PairingNotification.show(
