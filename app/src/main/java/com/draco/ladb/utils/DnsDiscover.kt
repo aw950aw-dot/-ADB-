@@ -1,5 +1,6 @@
 package com.draco.ladb.utils
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -28,6 +29,7 @@ class DnsDiscover private constructor(
     private val mainHandler = Handler(Looper.getMainLooper())
 
     companion object {
+        @SuppressLint("StaticFieldLeak")
         @Volatile private var instance: DnsDiscover? = null
         @Volatile var adbPort: Int? = null
         val pendingResolves = AtomicBoolean(false)
