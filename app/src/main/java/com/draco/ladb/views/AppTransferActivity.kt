@@ -148,7 +148,7 @@ class AppTransferActivity : AppCompatActivity() {
         search = EditText(this).apply {
             hint = "חיפוש לפי שם או מזהה חבילה"
             textSize = 14f
-            singleLine = true
+            setSingleLine(true)
             gravity = Gravity.CENTER_VERTICAL or Gravity.RIGHT
             setTextColor(Color.WHITE)
             setHintTextColor(Color.rgb(130, 149, 176))
