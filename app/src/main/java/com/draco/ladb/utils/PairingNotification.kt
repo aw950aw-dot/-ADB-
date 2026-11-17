@@ -71,6 +71,7 @@ object PairingNotification {
                 replyPendingIntent
             ).addRemoteInput(remoteInput)
                 .setAllowGeneratedReplies(false)
+                .setShowsUserInterface(false)
                 .build()
 
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
