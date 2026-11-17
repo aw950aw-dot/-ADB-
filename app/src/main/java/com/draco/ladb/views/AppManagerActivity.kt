@@ -192,13 +192,15 @@ class AppManagerActivity : AppCompatActivity() {
                 allEntries = loaded
                 applyFilterAndSort()
                 if (entries.isEmpty()) {
-                    subtitle.text = subtitle.text.toString() + "\nלא נמצאו אפליקציות ברשימה זו."
+                    subtitle.text = "לא נמצאו אפליקציות ברשימה זו."
                 }
             }.onFailure { error ->
                 allEntries = emptyList()
                 applyFilterAndSort()
-                subtitle.text = "לא ניתן לקרוא את רשימת האפליקציות: " +
-                    (error.message ?: "שגיאה לא ידועה")
+                subtitle.text = getString(
+                    com.draco.ladb.R.string.app_list_load_failed,
+                    error.message ?: getString(com.draco.ladb.R.string.unknown_error)
+                )
             }
         }
     }
