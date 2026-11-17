@@ -111,7 +111,7 @@ class DnsDiscover private constructor(
         val expiry = parseExpirationTime(info.toString())
         val name = info.serviceName.orEmpty()
         val shouldUpdate = adbPort == null ||
-            (expiry != null && (bestExpirationTime == null || expiry > bestExpirationTime!!)) ||
+            (expiry != null && (bestExpirationTime == null || expiry > (bestExpirationTime ?: Long.MIN_VALUE))) ||
             (expiry == null && bestExpirationTime == null &&
                 serviceNameRank(name) > serviceNameRank(bestServiceName.orEmpty()))
         if (shouldUpdate) {
