@@ -42,10 +42,19 @@ class ConnectionActivity : AppCompatActivity() {
     private lateinit var pairPanel: LinearLayout
     private lateinit var pairButton: TextView
     private var pairing = false
+    private var pendingSettingsLaunch = false
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) PairingNotification.show(this)
-            else Toast.makeText(this, "כדי להשתמש באישור מתוך ההתראה יש לאפשר התראות ל־ADB SMART.", Toast.LENGTH_LONG).show()
+            if (granted) {
+                PairingNotification.show(this)
+                if (pendingSettingsLaunch) {
+                    pendingSettingsLaunch = false
+                    launchDeveloperSettingsWindow()
+                }
+            } else {
+                pendingSettingsLaunch = false
+                Toast.makeText(this, "כדי להשתמש באישור מתוך ההתראה יש לאפשר התראות ל־ADB SMART.", Toast.LENGTH_LONG).show()
+            }
         }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
@@ -216,10 +225,24 @@ class ConnectionActivity : AppCompatActivity() {
     }
 
     private fun openDeveloperSettings() {
-        showPairingNotification()
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingSettingsLaunch = true
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        launchDeveloperSettingsWindow()
+    }
+
+    private fun launchDeveloperSettingsWindow() {
+        PairingNotification.show(this)
         try {
             val settingsIntent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK
+                // Request a separate Settings task and an adjacent window where the Android version allows it.
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
+                    Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT
             }
             startActivity(settingsIntent)
             Handler(Looper.getMainLooper()).postDelayed({
