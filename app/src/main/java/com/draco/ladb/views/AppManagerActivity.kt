@@ -21,6 +21,7 @@ import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.content.res.AppCompatResources
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -312,7 +313,7 @@ class AppManagerActivity : AppCompatActivity() {
                 val cached = iconCache.get(entry.packageName) ?: runCatching {
                     packageManager.getApplicationIcon(entry.info)
                 }.getOrNull()?.also { iconCache.put(entry.packageName, it) }
-                setImageDrawable(cached ?: getDrawable(android.R.drawable.sym_def_app_icon))
+                setImageDrawable(cached ?: AppCompatResources.getDrawable(this@AppManagerActivity, android.R.drawable.sym_def_app_icon))
             }
             row.addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(12) })
             val textColumn = LinearLayout(this@AppManagerActivity).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL }
