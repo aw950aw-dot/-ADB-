@@ -91,7 +91,7 @@ class AboutActivity : AppCompatActivity() {
             typeface = Typeface.DEFAULT_BOLD
         })
         author.addView(TextView(this).apply {
-            text = "aw950aw-dot"
+            text = "פרופיל במתמחים טופ"
             textSize = 17f
             setTextColor(palette.accent)
             typeface = Typeface.DEFAULT_BOLD
@@ -99,11 +99,11 @@ class AboutActivity : AppCompatActivity() {
             isClickable = true
             isFocusable = true
             setOnClickListener {
-                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/aw950aw-dot")))
+                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://mitmachim.top/user/%D7%90%D7%94%D7%A8%D7%9F")))
             }
         })
         author.addView(TextView(this).apply {
-            text = "פתיחת פרופיל GitHub"
+            text = "פתיחת פרופיל המפתח במתמחים טופ"
             textSize = 12f
             setTextColor(palette.muted)
         })
@@ -123,23 +123,13 @@ class AboutActivity : AppCompatActivity() {
             typeface = Typeface.DEFAULT_BOLD
         })
         credits.addView(TextView(this).apply {
-            text = "האפליקציה מבוססת על מנוע LADB ועל פרויקט המקור של Tyler Nijmeh. יש לשמור על הקרדיטים והרישיונות המקוריים."
+            text = "האפליקציה מבוססת על מנוע LADB. קרדיט מלא ורישיונות התלויות נשמרים במערכת הרישיונות."
             textSize = 12f
             setTextColor(palette.muted)
             setPadding(0, dp(7), 0, dp(7))
         })
-        val sourceLink = TextView(this).apply {
-            text = "פתיחת פרויקט המקור ב־GitHub"
-            textSize = 13f
-            setTextColor(palette.accent)
-            isClickable = true
-            setOnClickListener {
-                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/tytydraco/LADB")))
-            }
-        }
-        credits.addView(sourceLink)
         credits.addView(TextView(this).apply {
-            text = "הגרסה הזו כוללת התאמות, כלי גיבוי ושחזור ושיפורי ממשק בפרויקט aw950aw-dot."
+            text = "הגרסה הזו כוללת התאמות, כלי גיבוי ושחזור ושיפורי ממשק."
             textSize = 12f
             setTextColor(palette.muted)
             setPadding(0, dp(9), 0, 0)
