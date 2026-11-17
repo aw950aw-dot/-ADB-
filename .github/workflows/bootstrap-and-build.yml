@@ -78,12 +78,36 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew assembleRelease --stacktrace
-      - name: Verify APK signature and package metadata
+      - name: Apply final Android-compatible APK signature and verify package
+        env:
+          ADB_SMART_KEYSTORE_PATH: ${{ env.ADB_SMART_KEYSTORE_PATH }}
+          ADB_SMART_STORE_PASSWORD: ${{ secrets.ADB_SMART_STORE_PASSWORD }}
+          ADB_SMART_KEY_ALIAS: ${{ secrets.ADB_SMART_KEY_ALIAS }}
+          ADB_SMART_KEY_PASSWORD: ${{ secrets.ADB_SMART_KEY_PASSWORD }}
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           test -s "$APK"
+          if [ -n "$ADB_SMART_KEYSTORE_PATH" ]; then
+            SIGNING_STORE="$ADB_SMART_KEYSTORE_PATH"
+            STORE_PASS="$ADB_SMART_STORE_PASSWORD"
+            KEY_ALIAS="$ADB_SMART_KEY_ALIAS"
+            KEY_PASS="$ADB_SMART_KEY_PASSWORD"
+          else
+            SIGNING_STORE="$HOME/.android/debug.keystore"
+            STORE_PASS="android"
+            KEY_ALIAS="androiddebugkey"
+            KEY_PASS="android"
+          fi
+          "$APKSIGNER" sign \
+            --ks "$SIGNING_STORE" \
+            --ks-pass "pass:$STORE_PASS" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --key-pass "pass:$KEY_PASS" \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            "$APK"
           VERIFY_OUTPUT=$("$APKSIGNER" verify --verbose --print-certs "$APK")
           printf '%s\n' "$VERIFY_OUTPUT"
           echo "$VERIFY_OUTPUT" | grep -q "Verified using v1 scheme (JAR signing): true"
