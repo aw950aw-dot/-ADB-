@@ -84,12 +84,17 @@ jobs:
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           test -s "$APK"
-          "$APKSIGNER" verify --verbose --print-certs "$APK"
-          "$AAPT" dump badging "$APK" | head -n 8
+          VERIFY_OUTPUT=$("$APKSIGNER" verify --verbose --print-certs "$APK")
+          printf '%s\n' "$VERIFY_OUTPUT"
+          echo "$VERIFY_OUTPUT" | grep -q "Verified using v1 scheme (JAR signing): true"
+          echo "$VERIFY_OUTPUT" | grep -q "Verified using v2 scheme (APK Signature Scheme v2): true"
+          BADGING=$("$AAPT" dump badging "$APK")
+          printf '%s\n' "$BADGING" | head -n 8
+          echo "$BADGING" | grep -q "package: name='com.aw950aw.adbsmart' versionCode='13' versionName='1.9.3'"
           sha256sum "$APK"
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: adb-smart-1.9.2-installable
+          name: adb-smart-1.9.3-installable
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
