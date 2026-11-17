@@ -26,6 +26,7 @@ import androidx.activity.viewModels
 import com.draco.ladb.viewmodels.MainActivityViewModel
 import com.draco.ladb.utils.PairingNotification
 import com.draco.ladb.services.PairingService
+import com.draco.ladb.services.PairingDiscoveryService
 import androidx.core.content.ContextCompat
 import com.draco.ladb.utils.PairingPortDiscovery
 import com.draco.ladb.utils.UiTheme
@@ -46,10 +47,9 @@ class ConnectionActivity : AppCompatActivity() {
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) {
-                PairingNotification.show(this)
                 if (pendingSettingsLaunch) {
                     pendingSettingsLaunch = false
-                    launchDeveloperSettingsWindow()
+                    launchWirelessPairingWindow()
                 }
             } else {
                 pendingSettingsLaunch = false
@@ -85,8 +85,7 @@ class ConnectionActivity : AppCompatActivity() {
             pairButton.isEnabled = false
         } else if (vm.needsToPair()) {
             pairPanel.visibility = View.VISIBLE
-            status.text = "נדרש שיוך ראשוני — אפשר להזין את הקוד בהתראה שמופיעה למעלה"
-            showPairingNotification()
+            status.text = "נדרש שיוך ראשוני. פתח את מסך הצימוד; ההתראה תופיע אוטומטית כששירות הצימוד יימצא."
         } else {
             pairPanel.visibility = View.GONE
             startConnection()
@@ -107,7 +106,7 @@ class ConnectionActivity : AppCompatActivity() {
         } else if (!vm.needsToPair() && !pairing) {
             startConnection()
         } else if (!pairing) {
-            PairingNotification.show(this)
+            status.text = "ממתין לפתיחת מסך הצימוד האלחוטי."
         }
     }
 
@@ -172,8 +171,8 @@ class ConnectionActivity : AppCompatActivity() {
             "פותחים את חלון „שיוך מכשיר באמצעות קוד” ומשאירים אותו פתוח. האפליקציה תבצע את השיוך ברקע — בלי מסך מפוצל ובלי לחזור ממסך ההגדרות.",
             13, Color.rgb(221, 237, 251), false
         ).apply { setPadding(0, dp(8), 0, 0) })
-        hero.addView(actionButton("הצג עכשיו את התראת השיוך", Color.rgb(8, 30, 54), Color.WHITE) {
-            showPairingNotification()
+        hero.addView(actionButton("פתח מסך צימוד אלחוטי", Color.rgb(8, 30, 54), Color.WHITE) {
+            openDeveloperSettings()
         }, LinearLayout.LayoutParams(-1, dp(47)).apply { topMargin = dp(13) })
         content.addView(hero, LinearLayout.LayoutParams(-1, -2).apply {
             topMargin = dp(13)
@@ -194,7 +193,7 @@ class ConnectionActivity : AppCompatActivity() {
         val stepItems = listOf(
             "01" to "הפעל ניפוי באגים אלחוטי באפשרויות למפתחים.",
             "02" to "בחר „שיוך מכשיר באמצעות קוד” והשאר את החלון פתוח.",
-            "03" to "פתח את ההתראה, הקלד את הקוד בן 6 הספרות ולחץ „שלח קוד והתחבר”."
+            "03" to "כשתופיע התראת ADB SMART מעל ההגדרות, הקלד בה את הקוד בן 6 הספרות ואשר."
         )
         stepItems.forEach { (number, description) ->
             val row = LinearLayout(this).apply {
@@ -241,12 +240,12 @@ class ConnectionActivity : AppCompatActivity() {
         }
         content.addView(pairButton, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(12) })
 
-        content.addView(actionButton("פתח אפשרויות למפתחים", palette.surfaceAlt, palette.text) {
+        content.addView(actionButton("פתח מסך צימוד אלחוטי", palette.surfaceAlt, palette.text) {
             openDeveloperSettings()
         }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(9) })
 
         content.addView(text(
-            "חשוב: Android מנהל את מסך הקוד בעצמו. אחרי שהשיוך מצליח, ייתכן שחלון הקוד של המערכת ייסגר באופן טבעי; האפליקציה לא מנסה לסגור את Settings או להחזיר אותך אליה.",
+            "Android מנהל את חלון קוד הצימוד בעצמו. ברגע שהשיוך מאושר, המערכת סוגרת אותו. ADB SMART מאתרת מראש את שירות הצימוד ושולחת את הקוד מיד עם קבלתו.",
             11, palette.muted, false
         ).apply { setPadding(dp(3), dp(13), dp(3), 0) })
 
@@ -256,13 +255,7 @@ class ConnectionActivity : AppCompatActivity() {
     }
 
     private fun showPairingNotification() {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            PairingNotification.show(this)
-        }
+        startPairingDiscovery()
     }
 
     private fun openDeveloperSettings() {
@@ -273,24 +266,51 @@ class ConnectionActivity : AppCompatActivity() {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             return
         }
-        launchDeveloperSettingsWindow()
+        launchWirelessPairingWindow()
     }
 
-    private fun launchDeveloperSettingsWindow() {
-        PairingNotification.show(this)
+    /**
+     * Starts mDNS discovery first. The RemoteInput notification is posted only
+     * after Android's temporary _adb-tls-pairing service becomes visible.
+     */
+    private fun startPairingDiscovery() {
+        PairingNotification.cancel(this)
         try {
+            ContextCompat.startForegroundService(
+                this,
+                Intent(this, PairingDiscoveryService::class.java)
+            )
+            status.text = "מאתר את שירות הצימוד. השאר את חלון הצימוד פתוח; ההתראה תופיע אוטומטית."
+        } catch (error: Exception) {
+            status.text = "לא ניתן להתחיל איתור צימוד ברקע: ${error.message ?: "שגיאה"}"
+            Toast.makeText(this, status.text, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun launchWirelessPairingWindow() {
+        startPairingDiscovery()
+        val directPairingIntent = Intent("android.settings.WIRELESS_DEBUGGING_PAIRING_DIALOG")
+        try {
+            // Some Android Settings builds expose a direct system entry point
+            // for the Wireless Debugging pairing dialog. Use it when available.
+            if (directPairingIntent.resolveActivity(packageManager) != null) {
+                startActivity(directPairingIntent)
+                status.text = "נפתח חלון הצימוד של Android. ההתראה תופיע ברגע ששירות הצימוד יזוהה."
+                return
+            }
+        } catch (error: Exception) {
+            Log.w("ConnectionActivity", "Direct wireless pairing dialog is unavailable", error)
+        }
+
+        try {
+            // Fallback for OEM Settings apps that do not expose the direct action.
             val settingsIntent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).apply {
-                // Request a separate Settings task and an adjacent window where the Android version allows it.
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
-                    Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT
             }
             startActivity(settingsIntent)
-            Handler(Looper.getMainLooper()).postDelayed({
-                PairingNotification.show(this)
-            }, 900L)
+            status.text = "פתח ניפוי באגים אלחוטי, הפעל אותו ובחר „שיוך מכשיר באמצעות קוד”. ההתראה תופיע אוטומטית."
         } catch (_: Exception) {
-            Toast.makeText(this, "לא ניתן לפתוח את הגדרות המפתחים במכשיר הזה.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "לא ניתן לפתוח את הגדרות הצימוד במכשיר הזה.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -307,7 +327,6 @@ class ConnectionActivity : AppCompatActivity() {
         if (pairing || vm.adb.running.value == true) return
         if (pairingCode.length != 6 || pairingCode.any { !it.isDigit() }) {
             Toast.makeText(this, "יש להזין קוד שיוך בן 6 ספרות.", Toast.LENGTH_LONG).show()
-            showPairingNotification()
             return
         }
 
@@ -325,8 +344,6 @@ class ConnectionActivity : AppCompatActivity() {
         pairButton.isEnabled = false
         pairButton.text = "משייך ברקע…"
         status.text = "תהליך השיוך פועל ברקע. אפשר להשאיר את מסך ההגדרות פתוח."
-        PairingNotification.show(this)
-
         val serviceIntent = Intent(this, PairingService::class.java)
             .putExtra(PairingService.EXTRA_PAIRING_CODE, pairingCode)
         if (parsedPort != null) {
