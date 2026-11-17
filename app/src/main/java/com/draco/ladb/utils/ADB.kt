@@ -430,8 +430,16 @@ class ADB(private val context: Context) {
                 Thread.sleep(3_000)
                 val restored = runCatching { initServer() }.getOrDefault(false)
                 if (!restored) {
-                    debug("החיבור מחדש לא הצליח. אפשר לנסות להתחבר ממסך החיבור.")
-                    Thread.sleep(5_000)
+                    debug("החיבור מחדש לא הצליח. ממשיך לנסות כל 5 שניות…")
+                    while (!Thread.currentThread().isInterrupted && _running.value != true) {
+                        Thread.sleep(5_000)
+                        if (tryingToPair) continue
+                        val retrySucceeded = runCatching { initServer() }.getOrDefault(false)
+                        if (retrySucceeded) {
+                            _closed.postValue(false)
+                            break
+                        }
+                    }
                 } else {
                     _closed.postValue(false)
                 }
