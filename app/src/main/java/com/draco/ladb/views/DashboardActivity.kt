@@ -79,8 +79,7 @@ class DashboardActivity : AppCompatActivity() {
             background = rounded(Color.rgb(31, 104, 154), dp(18))
         }
         hero.addView(pill)
-        hero.addView(text("גיבוי ושחזור
-אפליקציות ונתונים", 28, Color.WHITE, true).apply {
+        hero.addView(text("גיבוי ושחזור\nאפליקציות ונתונים", 28, Color.WHITE, true).apply {
             setPadding(0, dp(10), 0, dp(6))
         })
         hero.addView(text(

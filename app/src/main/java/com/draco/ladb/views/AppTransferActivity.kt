@@ -100,8 +100,7 @@ class AppTransferActivity : AppCompatActivity() {
             ).apply { cornerRadius = dp(22).toFloat() }
         }
         hero.addView(text("APP TRANSFER", 11, Color.rgb(125, 211, 252), true))
-        hero.addView(text("מעבירים אפליקציה
-עם הנתונים שלה", 25, Color.WHITE, true).apply {
+        hero.addView(text("מעבירים אפליקציה\nעם הנתונים שלה", 25, Color.WHITE, true).apply {
             setPadding(0, dp(7), 0, dp(6))
         })
         hero.addView(text(

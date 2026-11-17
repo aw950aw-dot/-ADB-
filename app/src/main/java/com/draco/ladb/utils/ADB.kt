@@ -491,21 +491,37 @@ class ADB(private val context: Context) {
 
     data class CommandResult(val exitCode: Int, val output: String)
 
-    private fun processForAdb(arguments: List<String>): Process {
+    private fun processForAdb(arguments: List<String>, mergeError: Boolean = false): Process {
         return ProcessBuilder(listOf(adbPath) + arguments)
             .directory(context.filesDir)
             .apply {
+                if (mergeError) redirectErrorStream(true)
                 environment().put("HOME", context.filesDir.path)
                 environment().put("TMPDIR", context.cacheDir.path)
             }
             .start()
     }
 
+    private fun remoteStatusPath(): String =
+        "/data/local/tmp/.adb-smart-${java.util.UUID.randomUUID().toString().replace("-", "")}.status"
+
+    private fun wrapWithRemoteStatus(command: String, statusPath: String): String =
+        "$command; __adb_status=\$?; printf '%s' \"\$__adb_status\" > '$statusPath'"
+
+    private fun consumeRemoteStatus(statusPath: String): Int {
+        val result = executeShell(
+            "if [ -f '$statusPath' ]; then cat '$statusPath'; rm -f '$statusPath'; else printf missing; fi",
+            20
+        )
+        return result.output.trim().toIntOrNull()
+            ?: throw IllegalStateException("לא התקבל קוד ביצוע מהמכשיר המרוחק: ${result.output}")
+    }
+
     /** Executes one bounded command through the authorized local Wireless ADB connection. */
     fun executeShell(command: String, timeoutSeconds: Long = 30): CommandResult {
         require(command.isNotBlank() && command.length <= 12_000) { "Invalid shell command" }
         if (_running.value != true) throw IllegalStateException("אין חיבור ADB פעיל")
-        val process = processForAdb(listOf("shell", "sh", "-c", command))
+        val process = processForAdb(listOf("shell", "sh", "-c", command), mergeError = true)
         val output = java.io.ByteArrayOutputStream()
         val reader = Thread {
             runCatching { process.inputStream.use { it.copyTo(output) } }
@@ -524,7 +540,9 @@ class ADB(private val context: Context) {
         require(command.isNotBlank() && command.length <= 12_000) { "Invalid shell command" }
         if (_running.value != true) throw IllegalStateException("אין חיבור ADB פעיל")
         destination.parentFile?.mkdirs()
-        val process = processForAdb(listOf("exec-out", "sh", "-c", command))
+        val statusPath = remoteStatusPath()
+        val wrapped = wrapWithRemoteStatus(command, statusPath)
+        val process = processForAdb(listOf("exec-out", "sh", "-c", wrapped))
         val errorText = StringBuilder()
         val stdoutThread = Thread {
             runCatching {
@@ -548,12 +566,19 @@ class ADB(private val context: Context) {
         }
         stdoutThread.join(5_000)
         stderrThread.join(5_000)
-        val result = CommandResult(process.exitValue(), errorText.toString().trim())
-        if (result.exitCode != 0 || !destination.isFile || destination.length() == 0L) {
+        if (process.exitValue() != 0) {
             destination.delete()
-            throw IllegalStateException(result.output.ifBlank { "לא ניתן לקרוא את הנתונים דרך ADB" })
+            throw IllegalStateException(errorText.toString().ifBlank { "העברת הנתונים דרך ADB נכשלה" })
         }
-        return result
+        val remoteExit = try { consumeRemoteStatus(statusPath) } catch (e: Exception) {
+            destination.delete()
+            throw e
+        }
+        if (remoteExit != 0 || !destination.isFile || destination.length() == 0L) {
+            destination.delete()
+            throw IllegalStateException(errorText.toString().ifBlank { "פקודת הקריאה במכשיר נכשלה (קוד $remoteExit)" })
+        }
+        return CommandResult(remoteExit, errorText.toString().trim())
     }
 
     /** Streams a local binary archive to a remote command through adb exec-in. */
@@ -561,10 +586,12 @@ class ADB(private val context: Context) {
         require(source.isFile && source.canRead()) { "קובץ הגיבוי אינו קריא" }
         require(command.isNotBlank() && command.length <= 12_000) { "Invalid shell command" }
         if (_running.value != true) throw IllegalStateException("אין חיבור ADB פעיל")
-        val process = processForAdb(listOf("exec-in", "sh", "-c", command))
-        val outputText = StringBuilder()
+        val statusPath = remoteStatusPath()
+        val wrapped = wrapWithRemoteStatus(command, statusPath)
+        val process = processForAdb(listOf("exec-in", "sh", "-c", wrapped))
+        val errorText = StringBuilder()
         val reader = Thread {
-            runCatching { process.inputStream.bufferedReader().use { outputText.append(it.readText()) } }
+            runCatching { process.errorStream.bufferedReader().use { errorText.append(it.readText()) } }
         }.apply { isDaemon = true; start() }
 
         source.inputStream().use { input ->
@@ -577,7 +604,11 @@ class ADB(private val context: Context) {
             throw IllegalStateException("שחזור קובץ דרך ADB חרג מזמן ההמתנה")
         }
         reader.join(5_000)
-        return CommandResult(process.exitValue(), outputText.toString().trim())
+        if (process.exitValue() != 0) {
+            throw IllegalStateException(errorText.toString().ifBlank { "העברת הנתונים למכשיר נכשלה" })
+        }
+        val remoteExit = consumeRemoteStatus(statusPath)
+        return CommandResult(remoteExit, errorText.toString().trim())
     }
 
     /** Installs a base APK together with all split APKs in one Package Manager session. */
