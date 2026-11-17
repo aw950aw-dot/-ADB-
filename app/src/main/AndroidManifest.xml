@@ -3,6 +3,7 @@
     <queries>
         <intent>
             <action android:name="android.settings.WIRELESS_DEBUGGING_PAIRING_DIALOG"/>
+            <action android:name="android.settings.WIRELESS_DEBUGGING_SETTINGS"/>
         </intent>
     </queries>
     <uses-feature android:name="android.software.leanback" android:required="false"/>
