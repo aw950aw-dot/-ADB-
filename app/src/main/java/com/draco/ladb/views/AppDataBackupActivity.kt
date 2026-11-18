@@ -70,7 +70,7 @@ class AppDataBackupActivity : AppCompatActivity() {
             LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(10) })
         content.addView(header)
         content.addView(text(
-            "בחר פעולה. בשחזור בוחרים קודם את קובץ הגיבוי, ורק אחר כך מזינים את הסיסמה שלו.",
+            "בחר פעולה. בשחזור בוחרים קודם את קובץ הגיבוי, ורק אחר כך מזינים את הסיסמה שלו. הגיבוי המוצפן כולל גם את מפתח ADB הפרטי כאשר הוא קיים, וכך אפשר לשמר את שיוך Wireless Debugging לאחר הסרה והתקנה מחדש.",
             13, palette.muted, false
         ).apply { setPadding(0, dp(9), 0, dp(17)) })
 
@@ -119,7 +119,7 @@ class AppDataBackupActivity : AppCompatActivity() {
         }
         warning.addView(text("חשוב מאוד", 14, palette.text, true))
         warning.addView(text(
-            "בלי הסיסמה שבה הוצפן הקובץ לא ניתן לשחזר אותו. שמור את הסיסמה במקום בטוח. אחרי שחזור יש לסגור את ADB SMART לגמרי ולפתוח אותה מחדש כדי לטעון את כל ההגדרות והמפתחות.",
+            "בלי הסיסמה שבה הוצפן הקובץ לא ניתן לשחזר אותו. שמור את הסיסמה במקום בטוח. אחרי שחזור יש לסגור את ADB SMART לגמרי ולפתוח אותה מחדש. מפתח ADB נשמר בקובץ הגיבוי; אם הרשאת המחשב עדיין מאושרת במערכת Android, החיבור יוכל להתחדש בלי שיוך מחדש.",
             12, palette.muted, false
         ).apply { setPadding(0, dp(6), 0, 0) })
         content.addView(warning, LinearLayout.LayoutParams(-1, -2).apply {
@@ -150,17 +150,28 @@ class AppDataBackupActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
+                    val isConnectionBackup = intent.getBooleanExtra("backup_for_connection", false)
+                    if (isConnectionBackup && !AppDataBackupManager.hasAdbHostKey(this@AppDataBackupActivity)) {
+                        error("לא נמצא מפתח ADB במיקום הפרטי של האפליקציה. התחבר תחילה באמצעות Wireless Debugging ונסה שוב.")
+                    }
                     contentResolver.openOutputStream(uri)?.use { output ->
                         AppDataBackupManager.createBackup(this@AppDataBackupActivity, output, pass)
                     } ?: error("לא ניתן ליצור את קובץ הגיבוי.")
                 }
             }
             progress.dismiss()
+            if (result.isSuccess && AppDataBackupManager.hasAdbHostKey(this@AppDataBackupActivity)) {
+                getSharedPreferences("connection_backup_prompt", MODE_PRIVATE)
+                    .edit().putBoolean("backup_completed", true).apply()
+            }
             AlertDialog.Builder(this@AppDataBackupActivity)
                 .setTitle(if (result.isSuccess) "הגיבוי הושלם" else "יצירת הגיבוי נכשלה")
                 .setMessage(
-                    if (result.isSuccess) "קובץ הגיבוי המוצפן נשמר בהצלחה."
-                    else (result.exceptionOrNull()?.message ?: "שגיאה לא ידועה")
+                    if (result.isSuccess && AppDataBackupManager.hasAdbHostKey(this@AppDataBackupActivity)) {
+                        "קובץ הגיבוי המוצפן נשמר בהצלחה וכולל גם את מפתח ADB והגדרות השיוך. שמור את הקובץ ואת הסיסמה. לאחר התקנה מחדש, שחזר אותו וסגור ופתח מחדש את האפליקציה."
+                    } else if (result.isSuccess) {
+                        "קובץ הגיבוי המוצפן נשמר. עדיין אין בו מפתח ADB, ולכן הוא לא ישמר שיוך Wireless Debugging."
+                    } else (result.exceptionOrNull()?.message ?: "שגיאה לא ידועה")
                 )
                 .setPositiveButton("סגור", null)
                 .show()
@@ -222,8 +233,10 @@ class AppDataBackupActivity : AppCompatActivity() {
             AlertDialog.Builder(this@AppDataBackupActivity)
                 .setTitle(if (result.isSuccess) "השחזור הושלם" else "השחזור נכשל")
                 .setMessage(
-                    if (result.isSuccess) {
-                        "הנתונים שוחזרו. סגור את ADB SMART לגמרי ופתח אותה מחדש כדי לטעון את כל ההגדרות והמפתחות."
+                    if (result.isSuccess && AppDataBackupManager.hasAdbHostKey(this@AppDataBackupActivity)) {
+                        "הנתונים ומפתח ADB הפרטי שוחזרו. סגור את ADB SMART לגמרי ופתח אותה מחדש. אם אישור המחשב לא בוטל בהגדרות Android, החיבור האלחוטי יוכל להתחדש בלי שיוך מחדש."
+                    } else if (result.isSuccess) {
+                        "הנתונים שוחזרו, אך קובץ הגיבוי לא הכיל מפתח ADB. ייתכן שיהיה צורך לבצע שיוך Wireless Debugging מחדש."
                     } else {
                         result.exceptionOrNull()?.message ?: "לא ניתן לשחזר את הקובץ."
                     }
