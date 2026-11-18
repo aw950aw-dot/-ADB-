@@ -126,20 +126,19 @@ class PairingService : Service() {
             // pairing dialog opens. Preserve it instead of stopping and resetting mDNS.
             val nsd = getSystemService(NSD_SERVICE) as NsdManager
             val discovery = DnsDiscover.getInstance(applicationContext, nsd)
-            var endpoint = DnsDiscover.currentEndpoint()
-            if (endpoint == null) {
+            val endpoint = DnsDiscover.currentEndpoint() ?: run {
                 discovery.scanAdbPorts()
-                endpoint = waitForConnectEndpoint(15_000L)
-            }
-            endpoint = endpoint ?: error(
+                waitForConnectEndpoint(15_000L)
+            } ?: error(
                 "השיוך הצליח, אך לא נמצאה כתובת שירות ADB לחיבור. " +
-                    "השאר את Wireless Debugging פעיל, כבה והפעל אותו מחדש, ונסה שוב."
+                    "השאר את Wireless Debugging פעיל ונסה שוב."
             )
-            Log.i(TAG, "Found ADB TLS connect endpoint ${endpoint.serial} (${endpoint.serviceName})")
+            var activeEndpoint = endpoint
+            Log.i(TAG, "Found ADB TLS connect endpoint ${activeEndpoint.serial} (${activeEndpoint.serviceName})")
 
             var initialized = adb.initServer(
                 skipWirelessReset = true,
-                connectEndpointOverride = endpoint
+                connectEndpointOverride = activeEndpoint
             )
             if (!initialized) {
                 // One fresh mDNS attempt covers devices that rotate their TLS port
@@ -147,16 +146,16 @@ class PairingService : Service() {
                 discovery.stopScan()
                 discovery.scanAdbPorts()
                 val refreshed = waitForConnectEndpoint(10_000L)
-                if (refreshed != null && refreshed.serial != endpoint.serial) {
-                    endpoint = refreshed
+                if (refreshed != null && refreshed.serial != activeEndpoint.serial) {
+                    activeEndpoint = refreshed
                     initialized = adb.initServer(
                         skipWirelessReset = true,
-                        connectEndpointOverride = endpoint
+                        connectEndpointOverride = activeEndpoint
                     )
                 }
                 if (!initialized) {
                     error(
-                        "השיוך הצליח, אך החיבור ל־${refreshed?.serial ?: endpoint.serial} נכשל. " +
+                        "השיוך הצליח, אך החיבור ל־${refreshed?.serial ?: activeEndpoint.serial} נכשל. " +
                             "בדוק ש-Wireless Debugging עדיין פעיל ונסה שוב. " +
                             "פלט ADB אחרון: ${adb.outputBufferFile.readText().takeLast(900)}"
                     )
@@ -164,7 +163,7 @@ class PairingService : Service() {
             }
 
             val devices = adb.getDevices()
-            val expectedSerial = endpoint.serial
+            val expectedSerial = activeEndpoint.serial
             val connectedDevice = devices.firstOrNull {
                 expectedSerial != null && it.equals(expectedSerial, ignoreCase = true)
             } ?: devices.firstOrNull {
