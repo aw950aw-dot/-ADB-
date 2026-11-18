@@ -34,6 +34,18 @@ class ADB(private val context: Context) {
 
     private val adbPath = "${context.applicationInfo.nativeLibraryDir}/libadb.so"
     private val scriptPath = "${context.getExternalFilesDir(null)}/script.sh"
+    private val adbHomeDirectory = context.filesDir
+    private val adbKeyDirectory = File(adbHomeDirectory, ".android")
+    private val adbPrivateKeyFile = File(adbKeyDirectory, "adbkey")
+
+    /** The private host key is the identity Android remembers after Wireless Debugging pairing. */
+    fun hasAdbHostKey(): Boolean = adbPrivateKeyFile.isFile && adbPrivateKeyFile.length() > 0L
+
+    private fun prepareAdbHome() {
+        if (!adbKeyDirectory.exists() && !adbKeyDirectory.mkdirs()) {
+            throw IllegalStateException("לא ניתן ליצור תיקיית מפתח ADB.")
+        }
+    }
 
     /**
      * Is the shell ready to handle commands?
@@ -95,15 +107,13 @@ class ADB(private val context: Context) {
      * Start the ADB server
      */
     @Synchronized
-    fun initServer(
-        skipWirelessReset: Boolean = false,
-        connectEndpointOverride: AdbConnectEndpoint? = null
-    ): Boolean {
+    fun initServer(connectEndpointOverride: AdbConnectEndpoint? = null): Boolean {
         if (_running.value == true || (shizukuBackendEnabled && ShizukuAccess.isConnected())) return true
         if (tryingToPair) return false
 
         tryingToPair = true
         try {
+        prepareAdbHome()
         val autoShell = sharedPrefs.getBoolean(context.getString(R.string.auto_shell_key), true)
 
         val secureSettingsGranted =
@@ -113,9 +123,9 @@ class ADB(private val context: Context) {
             /* Only do wireless debugging steps on compatible versions */
             if (secureSettingsGranted) {
                 disableMobileDataAlwaysOn()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !skipWirelessReset) {
-                    cycleWirelessDebugging()
-                } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && !isUSBDebuggingEnabled()) {
+                // Never toggle Wireless Debugging automatically. Reconnect attempts must
+                // keep the existing OS debugging session alive instead of invalidating it.
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && !isUSBDebuggingEnabled()) {
                     debug("Turning on USB debugging...")
                     Settings.Global.putInt(
                         context.contentResolver,
@@ -362,50 +372,7 @@ class ADB(private val context: Context) {
      * For whatever reason, Wireless Debugging needs to be
      * cycled twice to broadcast a valid port.
      */
-    fun cycleWirelessDebugging() {
-        val secureSettingsGranted =
-            context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
-
-        if (secureSettingsGranted) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                debug("Cycling wireless debugging, please wait...")
-                // Only turn it off if it's already on.
-                if (isWirelessDebuggingEnabled()) {
-                    debug("Turning off wireless debugging...")
-                    Settings.Global.putInt(
-                        context.contentResolver,
-                        "adb_wifi_enabled",
-                        0
-                    )
-                    Thread.sleep(3_000)
-                }
-
-                debug("Turning on wireless debugging...")
-                Settings.Global.putInt(
-                    context.contentResolver,
-                    "adb_wifi_enabled",
-                    1
-                )
-                Thread.sleep(3_000)
-
-                debug("Turning off wireless debugging...")
-                Settings.Global.putInt(
-                    context.contentResolver,
-                    "adb_wifi_enabled",
-                    0
-                )
-                Thread.sleep(3_000)
-
-                debug("Turning on wireless debugging...")
-                Settings.Global.putInt(
-                    context.contentResolver,
-                    "adb_wifi_enabled",
-                    1
-                )
-                Thread.sleep(3_000)
-            }
-        }
-    }
+    /** Wireless Debugging is intentionally never cycled during normal connection or reconnect. */
 
     /** Starts exactly one monitor for the long-lived interactive ADB shell. */
     fun ensureShellDeathMonitor() {
@@ -488,6 +455,7 @@ class ADB(private val context: Context) {
         tryingToPair = true
         var pairProcess: Process? = null
         try {
+            prepareAdbHome()
             // Drain ADB output while it is running. Waiting before reading can fill the pipe
             // and make the pairing process appear to hang.
             val cleanHost = host.trim().removePrefix("[").removeSuffix("]").ifBlank { "localhost" }
