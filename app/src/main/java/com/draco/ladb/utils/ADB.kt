@@ -179,7 +179,7 @@ class ADB(private val context: Context) {
 
             debug("Starting ADB server...")
             val startResult = captureProcessOutput(
-                adb(false, listOf("start-server")),
+                processForAdb(listOf("start-server"), mergeError = true),
                 30,
                 "הפעלת שרת ADB חרגה מזמן ההמתנה."
             )
@@ -190,7 +190,7 @@ class ADB(private val context: Context) {
 
             if (connectEndpoint != null) {
                 val connectResult = captureProcessOutput(
-                    adb(false, listOf("connect", connectEndpoint.serial)),
+                    processForAdb(listOf("connect", connectEndpoint.serial), mergeError = true),
                     30,
                     "חיבור ADB לנקודת הקצה ${connectEndpoint.serial} חרג מזמן ההמתנה."
                 )
@@ -245,9 +245,14 @@ class ADB(private val context: Context) {
 
         shellProcess = if (autoShell) {
             var argList = listOf("shell")
-
-            /* Uh oh, multiple possible devices... */
-            if (deviceList.size > 1) {
+            val preferredSerial = connectEndpointOverride?.serial ?: DnsDiscover.currentEndpoint()?.serial
+            val preferredDevice = deviceList.firstOrNull {
+                preferredSerial != null && it.equals(preferredSerial, ignoreCase = true)
+            }
+            if (preferredDevice != null) {
+                Log.i("DEVICES", "Selecting exact mDNS endpoint: $preferredDevice")
+                argList = listOf("-s", preferredDevice, "shell")
+            } else if (deviceList.size > 1) {
                 Log.w("DEVICES", "Multiple devices detected...")
                 val localDevices = deviceList.filter { it ->
                     it.contains("localhost")
@@ -736,7 +741,7 @@ class ADB(private val context: Context) {
 
     /** Executes one bounded command through the authorized local Wireless ADB connection. */
     fun hasPrivilegedShell(): Boolean =
-        (_running.value == true) || (shizukuBackendEnabled && ShizukuAccess.isConnected())
+        if (shizukuBackendEnabled) ShizukuAccess.isConnected() else _running.value == true
 
     /** Switch to the explicitly approved Shizuku UserService backend. */
     fun activateShizukuBackend() {
