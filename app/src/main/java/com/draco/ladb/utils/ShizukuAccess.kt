@@ -21,7 +21,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 object ShizukuAccess {
     private const val TAG = "ADBShizuku"
     private const val REQUEST_CODE = 7301
-    private const val SERVICE_BIND_TIMEOUT_MS = 4_000L
+    private const val SERVICE_BIND_TIMEOUT_MS = 3_500L
 
     private val lock = Any()
     private val callbacks = CopyOnWriteArrayList<(Boolean, String) -> Unit>()
@@ -195,7 +195,7 @@ object ShizukuAccess {
                 runCatching { Shizuku.unbindUserService(args, null, true) }
                 complete(
                     false,
-                    "Shizuku לא הצליח להפעיל את שירות הפקודות בתוך 25 שניות. " +
+                    "Shizuku לא הצליח להפעיל את שירות הפקודות בתוך כ־4 שניות. " +
                         "בדוק שהשירות הראשי של Shizuku פעיל ועדכן את Shizuku לגרסה עדכנית."
                 )
             }
@@ -223,7 +223,7 @@ object ShizukuAccess {
                 }
 
                 val verifyThread = Thread {
-                    val check = runCatching { shell.execute("/system/bin/id", 5_000L) }
+                    val check = runCatching { shell.execute("/system/bin/id", 1_500L) }
                     if (check.isFailure) {
                         failBinding(
                             generation,
