@@ -124,13 +124,14 @@ class PairingService : Service() {
 
             // The TLS connect advertisement can already exist before the temporary
             // pairing dialog opens. Preserve it instead of stopping and resetting mDNS.
-            var connectEndpoint = DnsDiscover.currentEndpoint()
-            if (connectEndpoint == null) {
-                val nsd = getSystemService(NSD_SERVICE) as NsdManager
-                DnsDiscover.getInstance(applicationContext, nsd).scanAdbPorts()
-                connectEndpoint = waitForConnectEndpoint(15_000L)
+            val nsd = getSystemService(NSD_SERVICE) as NsdManager
+            val discovery = DnsDiscover.getInstance(applicationContext, nsd)
+            var endpoint = DnsDiscover.currentEndpoint()
+            if (endpoint == null) {
+                discovery.scanAdbPorts()
+                endpoint = waitForConnectEndpoint(15_000L)
             }
-            val endpoint = connectEndpoint ?: error(
+            endpoint = endpoint ?: error(
                 "השיוך הצליח, אך לא נמצאה כתובת שירות ADB לחיבור. " +
                     "השאר את Wireless Debugging פעיל, כבה והפעל אותו מחדש, ונסה שוב."
             )
@@ -143,14 +144,14 @@ class PairingService : Service() {
             if (!initialized) {
                 // One fresh mDNS attempt covers devices that rotate their TLS port
                 // immediately after pairing. Do not restart the pairing session.
-                DnsDiscover.stopScan()
-                val nsd = getSystemService(NSD_SERVICE) as NsdManager
-                DnsDiscover.getInstance(applicationContext, nsd).scanAdbPorts()
+                discovery.stopScan()
+                discovery.scanAdbPorts()
                 val refreshed = waitForConnectEndpoint(10_000L)
                 if (refreshed != null && refreshed.serial != endpoint.serial) {
+                    endpoint = refreshed
                     initialized = adb.initServer(
                         skipWirelessReset = true,
-                        connectEndpointOverride = refreshed
+                        connectEndpointOverride = endpoint
                     )
                 }
                 if (!initialized) {
@@ -163,7 +164,7 @@ class PairingService : Service() {
             }
 
             val devices = adb.getDevices()
-            val expectedSerial = connectEndpoint?.serial
+            val expectedSerial = endpoint.serial
             val connectedDevice = devices.firstOrNull {
                 expectedSerial != null && it.equals(expectedSerial, ignoreCase = true)
             } ?: devices.firstOrNull {
