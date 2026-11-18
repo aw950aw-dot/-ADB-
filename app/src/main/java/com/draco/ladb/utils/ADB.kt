@@ -93,7 +93,7 @@ class ADB(private val context: Context) {
      */
     fun getDevices(): List<String> {
         val process = processForAdb(listOf("devices"), mergeError = true)
-        val (exitCode, output) = captureProcessOutput(process, 15, "בדיקת התקני ADB חרגה מזמן ההמתנה.")
+        val (exitCode, output) = captureProcessOutput(process, 5, "בדיקת התקני ADB חרגה מזמן ההמתנה.")
         if (exitCode != 0) throw IllegalStateException(output.ifBlank { "לא ניתן לקרוא את רשימת התקני ADB." })
         val deviceNames = output.lineSequence().mapNotNull { line ->
             val parts = line.trim().split(Regex("\\s+"))
@@ -171,7 +171,7 @@ class ADB(private val context: Context) {
             }
 
             var connectEndpoint = connectEndpointOverride ?: DnsDiscover.currentEndpoint()
-            val discoveryDeadline = System.currentTimeMillis() + 15_000L
+            val discoveryDeadline = System.currentTimeMillis() + 3_000L
             while (connectEndpoint == null && System.currentTimeMillis() < discoveryDeadline) {
                 if (!DnsDiscover.pendingResolves.get() && DnsDiscover.adbPort == null) {
                     break
@@ -190,7 +190,7 @@ class ADB(private val context: Context) {
             debug("Starting ADB server...")
             val startResult = captureProcessOutput(
                 processForAdb(listOf("start-server"), mergeError = true),
-                30,
+                6,
                 "הפעלת שרת ADB חרגה מזמן ההמתנה."
             )
             if (startResult.first != 0) {
@@ -200,39 +200,39 @@ class ADB(private val context: Context) {
 
             if (connectEndpoint != null) {
                 val connectResult = captureProcessOutput(
-                    processForAdb(listOf("connect", connectEndpoint.serial), mergeError = true),
-                    30,
-                    "חיבור ADB לנקודת הקצה ${connectEndpoint.serial} חרג מזמן ההמתנה."
+                    processForAdb(listOf("connect", "127.0.0.1:${connectEndpoint.port}"), mergeError = true),
+                    6,
+                    "חיבור ADB לנקודה המקומית 127.0.0.1:${connectEndpoint.port} חרג מזמן ההמתנה."
                 )
                 val connectOutput = connectResult.second.trim()
-                debug("ADB CONNECT ${connectEndpoint.serial}: ${connectOutput.ifBlank { "exit=${connectResult.first}" }}")
+                debug("ADB CONNECT 127.0.0.1:${connectEndpoint.port}: ${connectOutput.ifBlank { "exit=${connectResult.first}" }}")
                 if (connectResult.first != 0 ||
                     connectOutput.contains("unable to connect", ignoreCase = true) ||
                     connectOutput.contains("cannot connect", ignoreCase = true) ||
                     connectOutput.contains("failed", ignoreCase = true)
                 ) {
                     throw IllegalStateException(
-                        "Android אישר את השיוך, אך adb connect ל־${connectEndpoint.serial} נכשל: " +
+                        "Android אישר את השיוך, אך adb connect ל־127.0.0.1:${connectEndpoint.port} נכשל: " +
                             connectOutput.ifBlank { "קוד יציאה ${connectResult.first}" }
                     )
                 }
             } else {
                 captureProcessOutput(
                     adb(false, listOf("wait-for-device")),
-                    60,
+                    6,
                     "לא נמצא התקן ADB מאושר. הפעל Wireless Debugging או חבר USB."
                 )
             }
 
-            val expectedSerial = connectEndpoint?.serial
-            val deviceDeadline = System.currentTimeMillis() + 20_000L
+            val expectedSerial = connectEndpoint?.let { "127.0.0.1:${it.port}" }
+            val deviceDeadline = System.currentTimeMillis() + 5_000L
             var deviceList = emptyList<String>()
             while (System.currentTimeMillis() < deviceDeadline) {
                 deviceList = runCatching { getDevices() }.getOrDefault(emptyList())
                 if (deviceList.isNotEmpty() &&
                     (expectedSerial == null || deviceList.any { it.equals(expectedSerial, ignoreCase = true) })
                 ) break
-                Thread.sleep(400L)
+                Thread.sleep(200L)
             }
             if (autoShell && deviceList.isEmpty()) {
                 throw IllegalStateException("השיוך הצליח אך ADB לא הציג התקן מאושר. בדוק ש-Wireless Debugging עדיין פעיל.")
@@ -255,7 +255,7 @@ class ADB(private val context: Context) {
 
         shellProcess = if (autoShell) {
             var argList = listOf("shell")
-            val preferredSerial = connectEndpointOverride?.serial ?: DnsDiscover.currentEndpoint()?.serial
+            val preferredSerial = (connectEndpointOverride ?: DnsDiscover.currentEndpoint())?.let { "127.0.0.1:${it.port}" }
             val preferredDevice = deviceList.firstOrNull {
                 preferredSerial != null && it.equals(preferredSerial, ignoreCase = true)
             }
@@ -297,6 +297,24 @@ class ADB(private val context: Context) {
                 }
             }
 
+            // Confirm the selected device can execute a real shell command before
+            // publishing the connection as ready. "device" in adb devices alone is not enough.
+            if (autoShell) {
+                val selectedSerial = argList.getOrNull(1)?.takeIf { argList.firstOrNull() == "-s" }
+                    ?: deviceList.first()
+                val probe = captureProcessOutput(
+                    processForAdb(listOf("-s", selectedSerial, "shell", "id"), mergeError = true),
+                    4,
+                    "בדיקת shell מול ההתקן חרגה מזמן ההמתנה."
+                )
+                if (probe.first != 0 || !Regex("""uid=\d+""").containsMatchIn(probe.second)) {
+                    throw IllegalStateException(
+                        "ADB זיהה התקן, אך לא הצליח לפתוח shell. תשובת בדיקה: " +
+                            probe.second.take(500).ifBlank { "ריקה" }
+                    )
+                }
+                debug("אומת shell פעיל מול $selectedSerial")
+            }
             adb(true, argList)
         } else {
             shell(true, listOf("sh", "-l"))
