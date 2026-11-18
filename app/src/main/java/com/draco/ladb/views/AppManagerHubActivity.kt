@@ -62,6 +62,24 @@ class AppManagerHubActivity : AppCompatActivity() {
             }, LinearLayout.LayoutParams(-1, dp(45)).apply { topMargin = dp(12) })
             content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(11) })
         }
+        val permissionsCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+            background = UiComponents.surface(this@AppManagerHubActivity, palette.surface, 17, palette.outline)
+        }
+        permissionsCard.addView(text("04", 11, palette.accent, true))
+        permissionsCard.addView(text("ניהול הרשאות אפליקציות", 18, palette.text, true).apply {
+            setPadding(0, dp(6), 0, dp(4))
+        })
+        permissionsCard.addView(text(
+            "הצג הרשאות Android רגילות שכל אפליקציה ביקשה, והענק או בטל אותן דרך ADB או Shizuku. הרשאות מיוחדות נשארות בשליטת הגדרות Android.",
+            12, palette.muted, false
+        ))
+        permissionsCard.addView(button("פתח מנהל הרשאות", palette.accent, Color.WHITE) {
+            startActivity(Intent(this, AppPermissionActivity::class.java))
+        }, LinearLayout.LayoutParams(-1, dp(45)).apply { topMargin = dp(12) })
+        content.addView(permissionsCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(11) })
+
         page.addView(scroll, LinearLayout.LayoutParams(-1, -1))
         setContentView(page)
         UiComponents.applySystemBars(this, page, palette)
