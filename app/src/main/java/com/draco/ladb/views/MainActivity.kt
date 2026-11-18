@@ -22,6 +22,7 @@ import com.draco.ladb.utils.ApiKeyVault
 import com.draco.ladb.utils.AiProviderClient
 import com.draco.ladb.utils.UiTheme
 import com.draco.ladb.utils.UiComponents
+import com.draco.ladb.utils.ConnectionBackupPrompt
 import com.draco.ladb.utils.AppDrawer
 import androidx.drawerlayout.widget.DrawerLayout
 import com.draco.ladb.viewmodels.MainActivityViewModel
@@ -345,6 +346,7 @@ class MainActivity : AppCompatActivity() {
             status.setTextColor(if (ready == true) Color.rgb(31, 170, 119) else palette.muted)
             connectionSpinner.visibility = if (ready == true) View.GONE else View.VISIBLE
             if (ready == true) {
+                ConnectionBackupPrompt.maybeShow(this, vm.adb)
                 val queued = pendingPresetCommand
                 if (!queued.isNullOrBlank()) {
                     pendingPresetCommand = null
