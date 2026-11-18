@@ -190,22 +190,28 @@ class ADB(private val context: Context) {
             }
 
             if (connectEndpoint != null) {
-                val connectResult = captureProcessOutput(
-                    processForAdb(listOf("connect", "127.0.0.1:${connectEndpoint.port}"), mergeError = true),
-                    remainingTimeoutSeconds(3),
-                    "חיבור ADB לנקודה המקומית 127.0.0.1:${connectEndpoint.port} חרג מזמן ההמתנה."
-                )
-                val connectOutput = connectResult.second.trim()
-                debug("ADB CONNECT 127.0.0.1:${connectEndpoint.port}: ${connectOutput.ifBlank { "exit=${connectResult.first}" }}")
-                if (connectResult.first != 0 ||
-                    connectOutput.contains("unable to connect", ignoreCase = true) ||
-                    connectOutput.contains("cannot connect", ignoreCase = true) ||
-                    connectOutput.contains("failed", ignoreCase = true)
-                ) {
-                    throw IllegalStateException(
-                        "Android אישר את השיוך, אך adb connect ל־127.0.0.1:${connectEndpoint.port} נכשל: " +
-                            connectOutput.ifBlank { "קוד יציאה ${connectResult.first}" }
+                val primarySerial = connectEndpoint.serial
+                val fallbackSerial = "127.0.0.1:" + connectEndpoint.port
+                val candidates = listOf(primarySerial, fallbackSerial).distinct()
+                var connectedSerial: String? = null
+                val failures = mutableListOf<String>()
+                for (serial in candidates) {
+                    val connectResult = captureProcessOutput(
+                        processForAdb(listOf("connect", serial), mergeError = true),
+                        remainingTimeoutSeconds(3),
+                        "חיבור ADB אל $serial חרג מזמן ההמתנה."
                     )
+                    val output = connectResult.second.trim()
+                    debug("ADB CONNECT $serial: " + output.ifBlank { "exit=" + connectResult.first })
+                    if (connectResult.first == 0 &&
+                        !output.contains("unable to connect", ignoreCase = true) &&
+                        !output.contains("cannot connect", ignoreCase = true) &&
+                        !output.contains("failed", ignoreCase = true)
+                    ) { connectedSerial = serial; break }
+                    failures.add("$serial: " + output.ifBlank { "exit=" + connectResult.first })
+                }
+                if (connectedSerial == null) {
+                    throw IllegalStateException("השיוך הצליח, אך חיבור ADB נכשל בכל כתובות השירות המקומי:\n" + failures.joinToString("\n"))
                 }
             } else {
                 captureProcessOutput(
@@ -215,7 +221,7 @@ class ADB(private val context: Context) {
                 )
             }
 
-            val expectedSerial = connectEndpoint?.let { "127.0.0.1:${it.port}" }
+            val expectedSerial = connectEndpoint?.serial
             val deviceDeadline = connectionDeadline
             var deviceList = emptyList<String>()
             while (System.currentTimeMillis() < deviceDeadline) {
