@@ -2,7 +2,6 @@ package com.draco.ladb.viewmodels
 
 import android.app.Application
 import android.content.Context
-import android.net.nsd.NsdManager
 import android.os.Build
 import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
@@ -12,7 +11,6 @@ import androidx.lifecycle.viewModelScope
 import androidx.preference.PreferenceManager
 import com.draco.ladb.R
 import com.draco.ladb.utils.ADB
-import com.draco.ladb.utils.DnsDiscover
 import com.draco.ladb.utils.ShizukuAccess
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -35,11 +33,6 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
         .getDefaultSharedPreferences(application.applicationContext)
 
     val adb = ADB.getInstance(getApplication<Application>().applicationContext)
-    val dnsDiscover =
-        DnsDiscover.getInstance(
-            application.applicationContext,
-            application.applicationContext.getSystemService(Context.NSD_SERVICE) as NsdManager
-        )
 
     private val _viewModelHasStartedADB = MutableLiveData(false)
     val viewModelHasStartedADB: LiveData<Boolean> = _viewModelHasStartedADB
@@ -49,7 +42,6 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
 
     init {
         startOutputThread()
-        dnsDiscover.scanAdbPorts()
     }
 
 
@@ -89,16 +81,23 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
             }
         }
 
-        // LADB's bundled ADB server conflicts with an active Shizuku server.
-        // Reuse Shizuku only when it is already running and this app is already
-        // authorized; otherwise continue immediately with the normal Wireless ADB path.
-        if (ShizukuAccess.isBinderAlive() && ShizukuAccess.hasPermission()) {
+        // Backends are exclusive. If Shizuku is already running, never start a
+        // competing bundled LADB server when its permission/bind step fails.
+        if (ShizukuAccess.isBinderAlive()) {
             runCatching {
-                ShizukuAccess.connect(getApplication<Application>().applicationContext) { ready, _ ->
+                ShizukuAccess.connect(getApplication<Application>().applicationContext) { ready, message ->
                     val activated = ready && runCatching { adb.activateShizukuBackend() }.isSuccess
-                    if (activated) completeStart(true) else startLocalAdb()
+                    if (activated) {
+                        completeStart(true)
+                    } else {
+                        adb.debug(message.ifBlank { "חיבור Shizuku לא הושלם. לא הופעל שרת ADB מקביל." })
+                        completeStart(false)
+                    }
                 }
-            }.onFailure { startLocalAdb() }
+            }.onFailure { error ->
+                adb.debug("חיבור Shizuku נכשל; לא מופעל שרת ADB מקביל: ${error.message}")
+                completeStart(false)
+            }
         } else {
             startLocalAdb()
         }
