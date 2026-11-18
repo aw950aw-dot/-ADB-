@@ -13,6 +13,7 @@ import androidx.preference.PreferenceManager
 import com.draco.ladb.R
 import com.draco.ladb.utils.ADB
 import com.draco.ladb.utils.DnsDiscover
+import com.draco.ladb.utils.ShizukuAccess
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -52,6 +53,16 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
     }
 
 
+    private fun completeStart(success: Boolean) {
+        if (success && !ShizukuAccess.isConnected()) startShellDeathThread()
+        _viewModelHasStartedADB.postValue(success)
+        val callbacks = synchronized(startLock) {
+            startInProgress = false
+            startCallbacks.toList().also { startCallbacks.clear() }
+        }
+        callbacks.forEach { waiting -> runCatching { waiting(success) } }
+    }
+
     fun startADBServer(callback: ((Boolean) -> Unit)? = null) {
         if (adb.running.value == true) {
             _viewModelHasStartedADB.postValue(true)
@@ -68,15 +79,28 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
         }
         if (!shouldStart) return
 
-        viewModelScope.launch(Dispatchers.IO) {
-            val success = runCatching { adb.initServer() }.getOrDefault(false)
-            if (success) startShellDeathThread()
-            _viewModelHasStartedADB.postValue(success)
-            val callbacks = synchronized(startLock) {
-                startInProgress = false
-                startCallbacks.toList().also { startCallbacks.clear() }
+        val fallbackStarted = java.util.concurrent.atomic.AtomicBoolean(false)
+        val startLocalAdb = {
+            if (fallbackStarted.compareAndSet(false, true)) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val success = runCatching { adb.initServer() }.getOrDefault(false)
+                    completeStart(success)
+                }
             }
-            callbacks.forEach { waiting -> runCatching { waiting(success) } }
+        }
+
+        // LADB's bundled ADB server conflicts with an active Shizuku server.
+        // Reuse Shizuku only when it is already running and this app is already
+        // authorized; otherwise continue immediately with the normal Wireless ADB path.
+        if (ShizukuAccess.isBinderAlive() && ShizukuAccess.hasPermission()) {
+            runCatching {
+                ShizukuAccess.connect(getApplication<Application>().applicationContext) { ready, _ ->
+                    val activated = ready && runCatching { adb.activateShizukuBackend() }.isSuccess
+                    if (activated) completeStart(true) else startLocalAdb()
+                }
+            }.onFailure { startLocalAdb() }
+        } else {
+            startLocalAdb()
         }
     }
 
