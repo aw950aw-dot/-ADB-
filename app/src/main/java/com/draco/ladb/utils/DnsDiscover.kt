@@ -10,6 +10,10 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import java.net.NetworkInterface
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.ServerSocket
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -77,7 +81,7 @@ class DnsDiscover private constructor(
         pendingResolves.set(true)
         try {
             nsdManager.discoverServices("_adb-tls-connect._tcp.", NsdManager.PROTOCOL_DNS_SD, discoveryListener)
-            mainHandler.postDelayed({ stopScan() }, 9_000L)
+            mainHandler.postDelayed({ stopScan() }, 3_000L)
         } catch (error: Exception) {
             started = false
             pendingResolves.set(false)
@@ -130,10 +134,48 @@ class DnsDiscover private constructor(
         }.getOrDefault(emptySet())
     }
 
+    /**
+     * Shizuku's AdbMdns uses the resolved address only to verify that the service
+     * belongs to this device. The ADB client itself must connect through loopback.
+     */
+    private fun isLocalInterfaceAddress(address: InetAddress): Boolean = runCatching {
+        val interfaces = NetworkInterface.getNetworkInterfaces() ?: return@runCatching false
+        interfaces.asSequence()
+            .filter { runCatching { it.isUp }.getOrDefault(false) }
+            .any { networkInterface ->
+                networkInterface.inetAddresses.asSequence().any { local ->
+                    local.address.contentEquals(address.address)
+                }
+            }
+    }.getOrDefault(false)
+
+    /** Same local-port probe used by Shizuku: bind succeeds only when nothing listens there. */
+    private fun isPortListeningOnLoopback(port: Int): Boolean = try {
+        ServerSocket().use { socket ->
+            socket.reuseAddress = false
+            socket.bind(InetSocketAddress("127.0.0.1", port), 1)
+            false
+        }
+    } catch (_: IOException) {
+        true
+    }
+
     private fun updateIfNewest(info: NsdServiceInfo) {
         val port = info.port
         if (port !in 1..65535) return
-        val host = info.host?.hostAddress?.substringBefore('%')?.takeIf { it.isNotBlank() } ?: return
+        val resolvedHost = info.host ?: return
+        if (!isLocalInterfaceAddress(resolvedHost)) {
+            Log.d(TAG, "Ignoring ADB TLS endpoint not owned by this device: ${resolvedHost.hostAddress}")
+            return
+        }
+        if (!isPortListeningOnLoopback(port)) {
+            Log.d(TAG, "Ignoring ADB TLS endpoint whose local port is not listening: $port")
+            return
+        }
+
+        // Do not connect to the Wi-Fi interface address. Shizuku and LADB connect
+        // to the local adbd listener through loopback on the same Android device.
+        val host = "127.0.0.1"
         val expiry = parseExpirationTime(info.toString())
         val name = info.serviceName.orEmpty()
         val shouldUpdate = adbPort == null ||
@@ -183,15 +225,6 @@ class DnsDiscover private constructor(
 
                 override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
                     try {
-                        val port = serviceInfo.port
-                        if (port !in 1..65535) return
-                        val host = serviceInfo.host?.hostAddress?.substringBefore('%')
-                        val localAddresses = getLocalIpAddresses()
-                        if (host != null && host != "127.0.0.1" && host != "::1" &&
-                            localAddresses.isNotEmpty() && host !in localAddresses) {
-                            Log.d(TAG, "Ignoring ADB service not hosted by this device: $host")
-                            return
-                        }
                         updateIfNewest(serviceInfo)
                     } catch (error: Exception) {
                         Log.w(TAG, "Could not process resolved ADB service", error)
