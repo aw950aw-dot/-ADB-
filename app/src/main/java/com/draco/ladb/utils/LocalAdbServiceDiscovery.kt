@@ -103,7 +103,7 @@ class LocalAdbServiceDiscovery(context: Context) {
                                 val host = info.host
                                 if (port !in 1..65535 || host == null) return
                                 if (!isAddressOnThisDevice(host)) {
-                                    Log.d(TAG_LOCAL_ADB_DISCOVERY, "Ignoring non-local ADB service: \${host.hostAddress}")
+                                    Log.d(TAG_LOCAL_ADB_DISCOVERY, "Ignoring non-local ADB service: ${host.hostAddress}")
                                     return
                                 }
                                 if (!isLocalAdbdPort(port)) {
@@ -113,7 +113,7 @@ class LocalAdbServiceDiscovery(context: Context) {
 
                                 val endpoint = AdbConnectEndpoint("127.0.0.1", port, info.serviceName.orEmpty())
                                 if (found.compareAndSet(null, endpoint)) {
-                                    Log.i(TAG_LOCAL_ADB_DISCOVERY, "Found fresh local ADB endpoint: \${endpoint.serial}")
+                                    Log.i(TAG_LOCAL_ADB_DISCOVERY, "Found fresh local ADB endpoint: ${endpoint.serial}")
                                     finished.countDown()
                                 }
                             } finally {
