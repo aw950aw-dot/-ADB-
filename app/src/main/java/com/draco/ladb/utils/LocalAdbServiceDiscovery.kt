@@ -45,6 +45,11 @@ class LocalAdbServiceDiscovery(context: Context) {
         val finished = CountDownLatch(1)
         val resolving = java.util.concurrent.atomic.AtomicBoolean(false)
         val pending = java.util.concurrent.ConcurrentLinkedQueue<NsdServiceInfo>()
+        fun isLocalPairingAddress(address: InetAddress): Boolean = runCatching {
+            val interfaces = NetworkInterface.getNetworkInterfaces() ?: return@runCatching false
+            interfaces.asSequence().filter { runCatching { it.isUp }.getOrDefault(false) }
+                .any { ni -> ni.inetAddresses.asSequence().any { it.address.contentEquals(address.address) } }
+        }.getOrDefault(false)
 
         val listener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String) = Unit
@@ -71,7 +76,7 @@ class LocalAdbServiceDiscovery(context: Context) {
                         override fun onServiceResolved(info: NsdServiceInfo) {
                             try {
                                 val host = info.host
-                                if (info.port == pairingPort && host != null && isAddressOnThisDevice(host)) {
+                                if (info.port == pairingPort && host != null && isLocalPairingAddress(host)) {
                                     found.compareAndSet(null, host.hostAddress.substringBefore("%"))
                                     finished.countDown()
                                 }
