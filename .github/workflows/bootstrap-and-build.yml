@@ -93,7 +93,6 @@ jobs:
           if-no-files-found: error
       - name: Run unit tests and Android lint (after publishing APK)
         timeout-minutes: 15
-        continue-on-error: true
         run: |
           chmod +x ./gradlew
           ./gradlew testReleaseUnitTest lintRelease --stacktrace
