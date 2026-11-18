@@ -44,12 +44,13 @@ object ShizukuAccess {
         }
     }
     private val permissionResultListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
-        if (requestCode != REQUEST_CODE) return@OnRequestPermissionResultListener
-        permissionRequestPending = false
-        if (grantResult == PackageManager.PERMISSION_GRANTED) {
-            bindUserService()
-        } else {
-            complete(false, "המשתמש לא אישר ל-ADB SMART גישה דרך Shizuku.")
+        if (requestCode == REQUEST_CODE) {
+            permissionRequestPending = false
+            if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                bindUserService()
+            } else {
+                complete(false, "המשתמש לא אישר ל-ADB SMART גישה דרך Shizuku.")
+            }
         }
     }
 
@@ -153,7 +154,13 @@ object ShizukuAccess {
 
         val connection = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-                val shell = IUserShellService.Stub.asInterface(service)
+                val binder = service
+                if (binder == null) {
+                    synchronized(lock) { binding = false; remote = null; serviceConnection = null }
+                    complete(false, "Shizuku לא החזיר חיבור לשירות הפקודות.")
+                    return
+                }
+                val shell = IUserShellService.Stub.asInterface(binder)
                 if (shell == null) {
                     synchronized(lock) { binding = false; remote = null; serviceConnection = null }
                     complete(false, "Shizuku התחבר אך שירות הפקודות לא נטען.")
