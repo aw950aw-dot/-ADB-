@@ -21,7 +21,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 object ShizukuAccess {
     private const val TAG = "ADBShizuku"
     private const val REQUEST_CODE = 7301
-    private const val SERVICE_BIND_TIMEOUT_MS = 25_000L
+    private const val SERVICE_BIND_TIMEOUT_MS = 4_000L
 
     private val lock = Any()
     private val callbacks = CopyOnWriteArrayList<(Boolean, String) -> Unit>()
