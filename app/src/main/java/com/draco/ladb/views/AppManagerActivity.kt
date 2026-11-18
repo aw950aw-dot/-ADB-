@@ -249,8 +249,8 @@ class AppManagerActivity : AppCompatActivity() {
 
     private fun performAction(entry: AppEntry) {
         if (actionInProgress) return
-        if (adb.running.value != true) {
-            Toast.makeText(this, "אין חיבור ADB פעיל. התחבר ונסה שוב.", Toast.LENGTH_LONG).show()
+        if (!adb.hasPrivilegedShell()) {
+            Toast.makeText(this, "אין חיבור פעיל. התחבר באמצעות ADB או Shizuku ונסה שוב.", Toast.LENGTH_LONG).show()
             return
         }
         actionInProgress = true
