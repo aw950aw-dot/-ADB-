@@ -518,7 +518,7 @@ class ADB(private val context: Context) {
                 writer.flush()
             }
 
-            val finished = activeProcess.waitFor(5, TimeUnit.SECONDS)
+            val finished = activeProcess.waitFor(20, TimeUnit.SECONDS)
             if (!finished) {
                 activeProcess.destroyForcibly()
                 activeProcess.waitFor(2, TimeUnit.SECONDS)
@@ -536,7 +536,12 @@ class ADB(private val context: Context) {
             runCatching { pairProcess?.destroyForcibly() }
             return false
         } finally {
-            // Keep the same ADB server after pairing; initServer reuses it for TLS connect.
+            // Match the proven LADB pairing lifecycle: stop the pair session's server,
+            // then let initServer create a clean server for the TLS connection.
+            runCatching {
+                val stop = processForAdb(listOf("kill-server"), mergeError = true)
+                captureProcessOutput(stop, 3, "סגירת שרת ADB אחרי שיוך חרגה מזמן ההמתנה.")
+            }.onFailure { Log.w("ADB", "Could not reset ADB server after pairing", it) }
             tryingToPair = false
         }
     }
