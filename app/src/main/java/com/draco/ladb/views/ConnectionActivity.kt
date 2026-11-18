@@ -87,6 +87,9 @@ class ConnectionActivity : AppCompatActivity() {
             status.setTextColor(Color.rgb(25, 155, 105))
             pairButton.text = "מחובר"
             pairButton.isEnabled = false
+        } else if (ShizukuAccess.isBinderAlive() && ShizukuAccess.hasPermission()) {
+            pairPanel.visibility = View.GONE
+            startConnection()
         } else if (vm.needsToPair()) {
             pairPanel.visibility = View.VISIBLE
             status.text = "נדרש שיוך ראשוני. פתח את מסך הצימוד; ההתראה תופיע אוטומטית כששירות הצימוד יימצא."
@@ -107,7 +110,10 @@ class ConnectionActivity : AppCompatActivity() {
             pairButton.text = "מחובר"
             pairButton.isEnabled = false
             pairPanel.visibility = View.GONE
-        } else if (!vm.needsToPair() && !pairing) {
+        } else if (!pairing &&
+            ((ShizukuAccess.isBinderAlive() && ShizukuAccess.hasPermission()) || !vm.needsToPair())
+        ) {
+            pairPanel.visibility = View.GONE
             startConnection()
         } else if (!pairing) {
             status.text = "ממתין לפתיחת מסך הצימוד האלחוטי."
