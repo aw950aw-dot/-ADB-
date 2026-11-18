@@ -42,6 +42,7 @@ class ADB(private val context: Context) {
     val running: LiveData<Boolean> = _running
 
     @Volatile private var tryingToPair = false
+    @Volatile private var shizukuBackendEnabled = false
 
     /**
      * Is the shell closed for any reason?
@@ -98,7 +99,7 @@ class ADB(private val context: Context) {
         skipWirelessReset: Boolean = false,
         connectEndpointOverride: AdbConnectEndpoint? = null
     ): Boolean {
-        if (_running.value == true) return true
+        if (_running.value == true || (shizukuBackendEnabled && ShizukuAccess.isConnected())) return true
         if (tryingToPair) return false
 
         tryingToPair = true
@@ -615,6 +616,20 @@ class ADB(private val context: Context) {
      * Send commands directly to the shell process
      */
     fun sendToShellProcess(msg: String) {
+        if (shizukuBackendEnabled) {
+            Thread {
+                runCatching { ShizukuAccess.executeShell(msg, 60) }
+                    .onSuccess { result ->
+                        debug("$ $msg")
+                        if (result.output.isNotBlank()) debug(result.output)
+                        debug("exit code: ${result.exitCode}")
+                    }
+                    .onFailure { error ->
+                        debug("Shizuku command failed: ${error.message ?: "unknown error"}")
+                    }
+            }.apply { isDaemon = true; name = "ShizukuCommand"; start() }
+            return
+        }
         val process = shellProcess ?: return
         if (!process.isAlive) return
         runCatching {
@@ -720,8 +735,33 @@ class ADB(private val context: Context) {
     }
 
     /** Executes one bounded command through the authorized local Wireless ADB connection. */
+    fun hasPrivilegedShell(): Boolean =
+        (_running.value == true) || (shizukuBackendEnabled && ShizukuAccess.isConnected())
+
+    /** Switch to the explicitly approved Shizuku UserService backend. */
+    fun activateShizukuBackend() {
+        if (!ShizukuAccess.isConnected()) {
+            throw IllegalStateException("Shizuku אינו מחובר או שלא אושרה ההרשאה.")
+        }
+        shizukuBackendEnabled = true
+        _closed.postValue(false)
+        _running.postValue(true)
+        debug("נפתח shell דרך Shizuku (UID ${ShizukuAccess.serverUid()}).")
+    }
+
+    fun deactivateShizukuBackend() {
+        if (!shizukuBackendEnabled) return
+        shizukuBackendEnabled = false
+        _running.postValue(false)
+        _closed.postValue(true)
+        debug("חיבור Shizuku נותק.")
+    }
+
     fun executeShell(command: String, timeoutSeconds: Long = 30): CommandResult {
         require(command.isNotBlank() && command.length <= 12_000) { "Invalid shell command" }
+        if (shizukuBackendEnabled) {
+            return ShizukuAccess.executeShell(command, timeoutSeconds)
+        }
         if (_running.value != true) throw IllegalStateException("אין חיבור ADB פעיל")
         val process = processForAdb(listOf("shell", "sh", "-c", command), mergeError = true)
         val (exitCode, output) = captureProcessOutput(process, timeoutSeconds, "פקודת ADB חרגה מזמן ההמתנה")
