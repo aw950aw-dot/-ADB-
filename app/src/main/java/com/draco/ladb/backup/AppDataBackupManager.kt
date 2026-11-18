@@ -1,7 +1,10 @@
 package com.draco.ladb.backup
 
 import android.content.Context
+import androidx.core.content.edit
+import androidx.preference.PreferenceManager
 import com.draco.ladb.BuildConfig
+import com.draco.ladb.R
 import com.draco.ladb.utils.ApiKeyVault
 import org.json.JSONObject
 import java.io.BufferedInputStream
@@ -34,6 +37,11 @@ object AppDataBackupManager {
     private const val MAX_ENTRIES = 10_000
     private const val MAX_UNCOMPRESSED_BYTES = 1024L * 1024L * 1024L
 
+    fun hasAdbHostKey(context: Context): Boolean {
+        val key = File(context.filesDir, ".android/adbkey")
+        return key.isFile && key.length() > 0L
+    }
+
     fun createBackup(context: Context, destination: OutputStream, password: String) {
         require(password.length >= 8) { "יש לבחור סיסמה באורך 8 תווים לפחות." }
         val salt = ByteArray(SALT_SIZE).also { SecureRandom().nextBytes(it) }
@@ -61,6 +69,7 @@ object AppDataBackupManager {
                 .put("format", 1)
                 .put("package", context.packageName)
                 .put("version", BuildConfig.VERSION_NAME)
+                .put("adb_host_key_included", hasAdbHostKey(context))
                 .put("created_at", System.currentTimeMillis())
             addBytes(zip, "meta.json", meta.toString().toByteArray(Charsets.UTF_8))
         }
@@ -149,6 +158,13 @@ object AppDataBackupManager {
             }
             val keysFile = File(staging, "api_keys.json")
             val keys = if (keysFile.isFile) JSONObject(keysFile.readText()) else JSONObject()
+            val adbKeyWasIncluded = meta.optBoolean("adb_host_key_included", false)
+            if (adbKeyWasIncluded) {
+                val stagedKey = File(staging, "files/.android/adbkey")
+                require(stagedKey.isFile && stagedKey.length() > 0L) {
+                    "הגיבוי מסומן ככולל מפתח ADB, אך המפתח חסר או פגום."
+                }
+            }
 
             val dataRoot = File(context.applicationInfo.dataDir)
             val restorePairs = buildList {
@@ -159,6 +175,16 @@ object AppDataBackupManager {
                 context.getExternalFilesDir(null)?.let { add(File(staging, "external_files") to it) }
             }
             restoreDirectoriesTransactionally(restorePairs)
+
+            if (adbKeyWasIncluded) {
+                require(hasAdbHostKey(context)) {
+                    "מפתח ADB לא שוחזר כראוי. החיבור האלחוטי לא נשמר."
+                }
+                // Keep the pairing state aligned with the restored ADB host key.
+                PreferenceManager.getDefaultSharedPreferences(context).edit {
+                    putBoolean(context.getString(R.string.paired_key), true)
+                }
+            }
 
             listOf("gemini", "openai", "anthropic", "custom").forEach { provider ->
                 ApiKeyVault.save(context, keys.optString(provider, ""), provider)
