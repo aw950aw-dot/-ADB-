@@ -76,7 +76,7 @@ class LocalAdbServiceDiscovery(context: Context) {
                         override fun onServiceResolved(info: NsdServiceInfo) {
                             try {
                                 val host = info.host
-                                if (info.port == pairingPort && host != null && isLocalPairingAddress(host)) {
+                                if (info.port == pairingPort && host != null && !host.isLinkLocalAddress && isLocalPairingAddress(host)) {
                                     found.compareAndSet(null, host.hostAddress.substringBefore("%"))
                                     finished.countDown()
                                 }
@@ -169,7 +169,7 @@ class LocalAdbServiceDiscovery(context: Context) {
                             try {
                                 val port = info.port
                                 val host = info.host
-                                if (port !in 1..65535 || host == null) return
+                                if (port !in 1..65535 || host == null || host.isLinkLocalAddress) return
                                 if (!isAddressOnThisDevice(host)) {
                                     Log.d(TAG_LOCAL_ADB_DISCOVERY, "Ignoring non-local ADB service: ${host.hostAddress}")
                                     return
