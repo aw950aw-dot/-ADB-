@@ -22,7 +22,7 @@ data class AdbConnectEndpoint(
     val serviceName: String
 ) {
     val serial: String
-        get() = "$host:$port"
+        get() = if (host.contains(":")) "[$host]:$port" else "$host:$port"
 }
 
 /**
@@ -123,9 +123,9 @@ class LocalAdbServiceDiscovery(context: Context) {
         }.getOrDefault(false)
 
         // Same test used by Shizuku: binding succeeds only if no local adbd listener owns this port.
-        fun isLocalAdbdPort(port: Int): Boolean = try {
+        fun isLocalAdbdPort(address: InetAddress, port: Int): Boolean = try {
             ServerSocket().use { socket ->
-                socket.bind(InetSocketAddress("127.0.0.1", port), 1)
+                socket.bind(InetSocketAddress(address, port), 1)
                 false
             }
         } catch (_: IOException) {
@@ -174,7 +174,7 @@ class LocalAdbServiceDiscovery(context: Context) {
                                     Log.d(TAG_LOCAL_ADB_DISCOVERY, "Ignoring non-local ADB service: ${host.hostAddress}")
                                     return
                                 }
-                                if (!isLocalAdbdPort(port)) {
+                                if (!isLocalAdbdPort(host, port)) {
                                     Log.d(TAG_LOCAL_ADB_DISCOVERY, "No local adbd listener on port $port")
                                     return
                                 }
