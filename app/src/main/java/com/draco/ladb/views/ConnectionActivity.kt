@@ -31,6 +31,7 @@ import com.draco.ladb.services.PairingDiscoveryService
 import androidx.core.content.ContextCompat
 import com.draco.ladb.utils.UiTheme
 import com.draco.ladb.utils.UiComponents
+import com.draco.ladb.utils.ConnectionBackupPrompt
 import com.draco.ladb.utils.ShizukuAccess
 
 /** Wireless Debugging pairing screen. The notification supplies the code; the app discovers the pairing port. */
@@ -67,6 +68,7 @@ class ConnectionActivity : AppCompatActivity() {
         buildScreen()
         vm.adb.running.observe(this) { connected ->
             if (connected == true) {
+                ConnectionBackupPrompt.maybeShow(this, vm.adb)
                 PairingNotification.cancel(this)
                 status.text = "●  מחובר ומוכן לפקודות"
                 status.setTextColor(Color.rgb(25, 155, 105))
