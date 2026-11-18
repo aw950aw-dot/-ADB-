@@ -15,7 +15,7 @@ class ShizukuShellService : IUserShellService.Stub() {
             "פקודה ריקה או ארוכה מדי"
         }
         val timeout = timeoutMillis.coerceIn(1_000L, 120_000L)
-        val process = ProcessBuilder("sh", "-c", command)
+        val process = ProcessBuilder("/system/bin/sh", "-c", command)
             .redirectErrorStream(true)
             .start()
         val output = ByteArrayOutputStream()
