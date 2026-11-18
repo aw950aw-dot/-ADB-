@@ -31,6 +31,7 @@ import com.draco.ladb.services.PairingDiscoveryService
 import androidx.core.content.ContextCompat
 import com.draco.ladb.utils.UiTheme
 import com.draco.ladb.utils.UiComponents
+import com.draco.ladb.utils.ShizukuAccess
 
 /** Wireless Debugging pairing screen. The notification supplies the code; the app discovers the pairing port. */
 class ConnectionActivity : AppCompatActivity() {
@@ -62,6 +63,7 @@ class ConnectionActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         UiTheme.applySavedMode(this)
         super.onCreate(savedInstanceState)
+        ShizukuAccess.initialize(this)
         buildScreen()
         vm.adb.running.observe(this) { connected ->
             if (connected == true) {
@@ -177,6 +179,13 @@ class ConnectionActivity : AppCompatActivity() {
         content.addView(hero, LinearLayout.LayoutParams(-1, -2).apply {
             topMargin = dp(13)
         })
+        content.addView(actionButton("התחבר דרך Shizuku (למי שכבר משתמש בו)", palette.accent, Color.WHITE) {
+            connectViaShizuku()
+        }, LinearLayout.LayoutParams(-1, dp(49)).apply { topMargin = dp(10) })
+        content.addView(text(
+            "Shizuku מאפשר להשתמש בהרשאת shell שכבר אישרת שם, בלי לבצע שיוך Wireless Debugging נוסף. ההרשאה תתבקש מ-Shizuku עצמו.",
+            11, palette.muted, false
+        ).apply { setPadding(dp(3), dp(6), dp(3), dp(4)) })
 
         status = text("בודק מצב חיבור…", 13, palette.text, true).apply {
             setPadding(dp(14), dp(13), dp(14), dp(13))
@@ -252,6 +261,36 @@ class ConnectionActivity : AppCompatActivity() {
         page.addView(scroll, LinearLayout.LayoutParams(-1, -1))
         setContentView(page)
         UiComponents.applySystemBars(this, page, palette)
+    }
+
+    private fun connectViaShizuku() {
+        status.text = "בודק את Shizuku ומבקש הרשאה אם צריך…"
+        pairButton.isEnabled = false
+        ShizukuAccess.connect(this) { success, message ->
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (success) {
+                    runCatching { vm.adb.activateShizukuBackend() }
+                        .onSuccess {
+                            pairing = false
+                            pairPanel.visibility = View.GONE
+                            status.text = "●  $message"
+                            status.setTextColor(Color.rgb(25, 155, 105))
+                            pairButton.text = "מחובר דרך Shizuku"
+                            pairButton.isEnabled = false
+                            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                        }
+                        .onFailure { error ->
+                            status.text = error.message ?: "הפעלת Shizuku נכשלה."
+                            pairButton.isEnabled = true
+                        }
+                } else {
+                    status.text = message
+                    pairButton.isEnabled = true
+                    Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     private fun openWirelessPairingSettings() {
