@@ -136,10 +136,7 @@ class PairingService : Service() {
             var activeEndpoint = endpoint
             Log.i(TAG, "Found ADB TLS connect endpoint ${activeEndpoint.serial} (${activeEndpoint.serviceName})")
 
-            var initialized = adb.initServer(
-                skipWirelessReset = true,
-                connectEndpointOverride = activeEndpoint
-            )
+            var initialized = adb.initServer(connectEndpointOverride = activeEndpoint)
             if (!initialized) {
                 // One fresh mDNS attempt covers devices that rotate their TLS port
                 // immediately after pairing. Do not restart the pairing session.
@@ -148,10 +145,7 @@ class PairingService : Service() {
                 val refreshed = waitForConnectEndpoint(10_000L)
                 if (refreshed != null && refreshed.serial != activeEndpoint.serial) {
                     activeEndpoint = refreshed
-                    initialized = adb.initServer(
-                        skipWirelessReset = true,
-                        connectEndpointOverride = activeEndpoint
-                    )
+                    initialized = adb.initServer(connectEndpointOverride = activeEndpoint)
                 }
                 if (!initialized) {
                     error(
