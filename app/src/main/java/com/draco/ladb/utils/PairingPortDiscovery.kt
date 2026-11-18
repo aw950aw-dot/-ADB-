@@ -6,7 +6,8 @@ import android.net.nsd.NsdServiceInfo
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.NetworkInterface
-import java.net.Socket
+import java.net.ServerSocket
+import java.io.IOException
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -26,13 +27,27 @@ class PairingPortDiscovery(context: Context) {
         val resolving = AtomicBoolean(false)
         val pending = ConcurrentLinkedQueue<NsdServiceInfo>()
 
-        fun localAddresses(): List<InetAddress> = runCatching {
-            val interfaces = NetworkInterface.getNetworkInterfaces() ?: return@runCatching emptyList()
+        fun isLocalAddress(address: InetAddress): Boolean = runCatching {
+            val interfaces = NetworkInterface.getNetworkInterfaces() ?: return@runCatching false
             interfaces.asSequence()
                 .filter { runCatching { it.isUp }.getOrDefault(false) }
-                .flatMap { it.inetAddresses.asSequence() }
-                .toList()
-        }.getOrDefault(emptyList())
+                .any { networkInterface ->
+                    networkInterface.inetAddresses.asSequence().any { local ->
+                        local.address.contentEquals(address.address)
+                    }
+                }
+        }.getOrDefault(false)
+
+        // Match Shizuku's AdbMdns: an occupied loopback port indicates local adbd.
+        fun isPortListeningLocally(port: Int): Boolean = try {
+            ServerSocket().use { socket ->
+                socket.reuseAddress = false
+                socket.bind(InetSocketAddress("127.0.0.1", port), 1)
+                false
+            }
+        } catch (_: IOException) {
+            true
+        }
 
         lateinit var resolveNext: () -> Unit
         resolveNext = {
@@ -54,23 +69,14 @@ class PairingPortDiscovery(context: Context) {
                                     val port = serviceInfo.port
                                     val host = serviceInfo.host
                                     if (port in 1..65535 && host != null) {
-                                        val isLocal = host.isLoopbackAddress ||
-                                            localAddresses().any { it.address.contentEquals(host.address) }
-                                        val reachable = if (isLocal) {
-                                            runCatching {
-                                                Socket().use { socket ->
-                                                    socket.connect(InetSocketAddress(host, port), 350)
-                                                }
-                                            }.isSuccess
-                                        } else {
-                                            false
-                                        }
+                                        val isLocal = host.isLoopbackAddress || isLocalAddress(host)
+                                        val localListener = isLocal && isPortListeningLocally(port)
 
-                                        if (isLocal && reachable) {
+                                        if (localListener) {
                                             foundEndpoint.compareAndSet(
                                                 null,
-                                                // Pair from the local ADB client through loopback, as Shizuku does.
-                                                PairingEndpoint("localhost", port)
+                                                // Pair the embedded ADB client to Android's local adbd listener.
+                                                PairingEndpoint("127.0.0.1", port)
                                             )
                                             finished.countDown()
                                         }
