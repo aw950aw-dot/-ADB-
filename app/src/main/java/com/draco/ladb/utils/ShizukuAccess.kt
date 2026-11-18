@@ -42,6 +42,7 @@ object ShizukuAccess {
             binding = false
             serviceConnection = null
         }
+        appContext?.let { runCatching { ADB.getInstance(it).deactivateShizukuBackend() } }
     }
     private val permissionResultListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
         if (requestCode == REQUEST_CODE) {
@@ -189,6 +190,7 @@ object ShizukuAccess {
                     binding = false
                     serviceConnection = null
                 }
+                appContext?.let { runCatching { ADB.getInstance(it).deactivateShizukuBackend() } }
                 Log.w(TAG, "Shizuku UserService disconnected")
             }
         }
