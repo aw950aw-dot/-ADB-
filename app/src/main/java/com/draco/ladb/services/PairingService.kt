@@ -122,30 +122,28 @@ class PairingService : Service() {
                 putBoolean(getString(R.string.paired_key), true)
             }
 
-            // The TLS connect advertisement can already exist before the temporary
-            // pairing dialog opens. Preserve it instead of stopping and resetting mDNS.
+            // Re-discover the TLS connect endpoint AFTER pairing. The port advertised
+            // before the code is entered can be stale by the time pairing has completed.
             val nsd = getSystemService(NSD_SERVICE) as NsdManager
             val discovery = DnsDiscover.getInstance(applicationContext, nsd)
-            val endpoint = DnsDiscover.currentEndpoint() ?: run {
-                discovery.scanAdbPorts()
-                waitForConnectEndpoint(3_000L)
-            } ?: error(
-                "השיוך הצליח, אך לא נמצאה כתובת שירות ADB לחיבור. " +
+            discovery.stopScan()
+            discovery.scanAdbPorts()
+            val endpoint = waitForConnectEndpoint(9_000L) ?: error(
+                "השיוך הצליח, אך Android לא פרסם פורט ADB חדש אחרי השיוך. " +
                     "השאר את Wireless Debugging פעיל ונסה שוב."
             )
             val activeEndpoint = endpoint.copy(host = "127.0.0.1")
-            Log.i(TAG, "Found ADB TLS connect endpoint 127.0.0.1:${activeEndpoint.port} (${activeEndpoint.serviceName})")
+            Log.i(TAG, "Fresh post-pair TLS endpoint: 127.0.0.1:${activeEndpoint.port} (${activeEndpoint.serviceName})")
 
+            // initServer starts a clean ADB server and verifies that a real shell opens.
             val initialized = adb.initServer(connectEndpointOverride = activeEndpoint)
             if (!initialized) {
                 error(
                     "השיוך הצליח, אך ADB לא פתח shell מול 127.0.0.1:${activeEndpoint.port}. " +
-                        "בדוק ש-Wireless Debugging עדיין פעיל ונסה שוב. " +
                         "פלט ADB אחרון: ${adb.outputBufferFile.readText().takeLast(900)}"
                 )
             }
 
-            // initServer verifies a live ADB shell id check before returning true.
             connected = true
             adb.ensureShellDeathMonitor()
             resultMessage = "השיוך והחיבור ל־ADB הושלמו: 127.0.0.1:${activeEndpoint.port}"
