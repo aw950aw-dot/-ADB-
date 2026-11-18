@@ -91,9 +91,9 @@ class ADB(private val context: Context) {
     /**
      * Get a list of connected devices.
      */
-    fun getDevices(): List<String> {
+    fun getDevices(timeoutSeconds: Long = 5): List<String> {
         val process = processForAdb(listOf("devices"), mergeError = true)
-        val (exitCode, output) = captureProcessOutput(process, 5, "בדיקת התקני ADB חרגה מזמן ההמתנה.")
+        val (exitCode, output) = captureProcessOutput(process, timeoutSeconds, "בדיקת התקני ADB חרגה מזמן ההמתנה.")
         if (exitCode != 0) throw IllegalStateException(output.ifBlank { "לא ניתן לקרוא את רשימת התקני ADB." })
         val deviceNames = output.lineSequence().mapNotNull { line ->
             val parts = line.trim().split(Regex("\\s+"))
@@ -119,10 +119,21 @@ class ADB(private val context: Context) {
         val secureSettingsGranted =
             context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
 
+        if (autoShell && secureSettingsGranted) disableMobileDataAlwaysOn()
+
+        // One shared five-second budget for Wireless ADB startup, connect and shell verification.
+        val connectionDeadline = System.currentTimeMillis() + 5_000L
+        fun remainingTimeoutSeconds(limit: Long): Long {
+            val remainingMillis = connectionDeadline - System.currentTimeMillis()
+            if (remainingMillis <= 0L) {
+                throw IllegalStateException("חיבור Wireless ADB לא הושלם בתוך חמש שניות.")
+            }
+            return minOf(limit, ((remainingMillis + 999L) / 1_000L).coerceAtLeast(1L))
+        }
+
         if (autoShell) {
             /* Only do wireless debugging steps on compatible versions */
             if (secureSettingsGranted) {
-                disableMobileDataAlwaysOn()
                 // Never toggle Wireless Debugging automatically. Reconnect attempts must
                 // keep the existing OS debugging session alive instead of invalidating it.
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && !isUSBDebuggingEnabled()) {
@@ -144,13 +155,12 @@ class ADB(private val context: Context) {
                     debug("Settings -> Developer options -> Wireless debugging")
                     debug("Waiting for wireless debugging...")
 
-                    val waitUntil = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(120)
                     while (!isWirelessDebuggingEnabled()) {
-                        if (System.currentTimeMillis() >= waitUntil) {
-                            debug("Wireless Debugging לא הופעל בתוך שתי דקות.")
+                        if (System.currentTimeMillis() >= connectionDeadline) {
+                            debug("Wireless Debugging לא הופעל בתוך חמש שניות.")
                             return false
                         }
-                        Thread.sleep(500)
+                        Thread.sleep(200)
                     }
                 }
             } else {
@@ -159,25 +169,24 @@ class ADB(private val context: Context) {
                     debug("Settings -> Developer options -> USB debugging")
                     debug("Waiting for USB debugging...")
 
-                    val waitUntil = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(120)
                     while (!isUSBDebuggingEnabled()) {
-                        if (System.currentTimeMillis() >= waitUntil) {
-                            debug("USB Debugging לא הופעל בתוך שתי דקות.")
+                        if (System.currentTimeMillis() >= connectionDeadline) {
+                            debug("USB Debugging לא הופעל בתוך חמש שניות.")
                             return false
                         }
-                        Thread.sleep(500)
+                        Thread.sleep(200)
                     }
                 }
             }
 
             var connectEndpoint = connectEndpointOverride ?: DnsDiscover.currentEndpoint()
-            val discoveryDeadline = System.currentTimeMillis() + 3_000L
+            val discoveryDeadline = minOf(connectionDeadline, System.currentTimeMillis() + 1_500L)
             while (connectEndpoint == null && System.currentTimeMillis() < discoveryDeadline) {
                 if (!DnsDiscover.pendingResolves.get() && DnsDiscover.adbPort == null) {
                     break
                 }
                 debug("מאתר כתובת ADB מאובטחת בשירות mDNS…")
-                Thread.sleep(300L)
+                Thread.sleep(150L)
                 connectEndpoint = DnsDiscover.currentEndpoint()
             }
 
@@ -190,7 +199,7 @@ class ADB(private val context: Context) {
             debug("Starting ADB server...")
             val startResult = captureProcessOutput(
                 processForAdb(listOf("start-server"), mergeError = true),
-                6,
+                remainingTimeoutSeconds(2),
                 "הפעלת שרת ADB חרגה מזמן ההמתנה."
             )
             if (startResult.first != 0) {
@@ -201,7 +210,7 @@ class ADB(private val context: Context) {
             if (connectEndpoint != null) {
                 val connectResult = captureProcessOutput(
                     processForAdb(listOf("connect", "127.0.0.1:${connectEndpoint.port}"), mergeError = true),
-                    6,
+                    remainingTimeoutSeconds(2),
                     "חיבור ADB לנקודה המקומית 127.0.0.1:${connectEndpoint.port} חרג מזמן ההמתנה."
                 )
                 val connectOutput = connectResult.second.trim()
@@ -219,20 +228,21 @@ class ADB(private val context: Context) {
             } else {
                 captureProcessOutput(
                     adb(false, listOf("wait-for-device")),
-                    6,
+                    remainingTimeoutSeconds(3),
                     "לא נמצא התקן ADB מאושר. הפעל Wireless Debugging או חבר USB."
                 )
             }
 
             val expectedSerial = connectEndpoint?.let { "127.0.0.1:${it.port}" }
-            val deviceDeadline = System.currentTimeMillis() + 5_000L
+            val deviceDeadline = connectionDeadline
             var deviceList = emptyList<String>()
             while (System.currentTimeMillis() < deviceDeadline) {
-                deviceList = runCatching { getDevices() }.getOrDefault(emptyList())
+                val remaining = ((deviceDeadline - System.currentTimeMillis() + 999L) / 1_000L).coerceAtLeast(1L)
+                deviceList = runCatching { getDevices(remaining.coerceAtMost(2L)) }.getOrDefault(emptyList())
                 if (deviceList.isNotEmpty() &&
                     (expectedSerial == null || deviceList.any { it.equals(expectedSerial, ignoreCase = true) })
                 ) break
-                Thread.sleep(200L)
+                if (System.currentTimeMillis() < deviceDeadline) Thread.sleep(150L)
             }
             if (autoShell && deviceList.isEmpty()) {
                 throw IllegalStateException("השיוך הצליח אך ADB לא הציג התקן מאושר. בדוק ש-Wireless Debugging עדיין פעיל.")
@@ -304,7 +314,7 @@ class ADB(private val context: Context) {
                     ?: deviceList.first()
                 val probe = captureProcessOutput(
                     processForAdb(listOf("-s", selectedSerial, "shell", "id"), mergeError = true),
-                    4,
+                    remainingTimeoutSeconds(2),
                     "בדיקת shell מול ההתקן חרגה מזמן ההמתנה."
                 )
                 if (probe.first != 0 || !Regex("""uid=\d+""").containsMatchIn(probe.second)) {
@@ -508,7 +518,7 @@ class ADB(private val context: Context) {
                 writer.flush()
             }
 
-            val finished = activeProcess.waitFor(20, TimeUnit.SECONDS)
+            val finished = activeProcess.waitFor(5, TimeUnit.SECONDS)
             if (!finished) {
                 activeProcess.destroyForcibly()
                 activeProcess.waitFor(2, TimeUnit.SECONDS)
@@ -526,15 +536,7 @@ class ADB(private val context: Context) {
             runCatching { pairProcess?.destroyForcibly() }
             return false
         } finally {
-            runCatching {
-                val killServer = ProcessBuilder(adbPath, "kill-server")
-                    .directory(context.filesDir)
-                    .apply {
-                        environment().put("HOME", context.filesDir.path)
-                        environment().put("TMPDIR", context.cacheDir.path)
-                    }.start()
-                if (!killServer.waitFor(3, TimeUnit.SECONDS)) killServer.destroyForcibly()
-            }
+            // Keep the same ADB server after pairing; initServer reuses it for TLS connect.
             tryingToPair = false
         }
     }
