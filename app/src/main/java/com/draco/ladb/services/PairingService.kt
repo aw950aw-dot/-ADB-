@@ -105,7 +105,7 @@ class PairingService : Service() {
         var resultMessage = "השיוך והחיבור לא הושלמו."
         try {
             val discovered = if (requestedPort == null) {
-                PairingPortDiscovery(applicationContext).findPairingEndpoint(15_000L)
+                PairingPortDiscovery(applicationContext).findPairingEndpoint(3_000L)
             } else null
             val pairingPort = requestedPort ?: discovered?.port ?: error(
                 "לא נמצא פורט שיוך. פתח את חלון „שיוך באמצעות קוד” ונסה שוב."
@@ -133,43 +133,22 @@ class PairingService : Service() {
                 "השיוך הצליח, אך לא נמצאה כתובת שירות ADB לחיבור. " +
                     "השאר את Wireless Debugging פעיל ונסה שוב."
             )
-            var activeEndpoint = endpoint.copy(host = "127.0.0.1")
-            Log.i(TAG, "Found ADB TLS connect endpoint ${activeEndpoint.serial} (${activeEndpoint.serviceName})")
+            val activeEndpoint = endpoint.copy(host = "127.0.0.1")
+            Log.i(TAG, "Found ADB TLS connect endpoint 127.0.0.1:${activeEndpoint.port} (${activeEndpoint.serviceName})")
 
-            var initialized = adb.initServer(connectEndpointOverride = activeEndpoint)
+            val initialized = adb.initServer(connectEndpointOverride = activeEndpoint)
             if (!initialized) {
-                // One fresh mDNS attempt covers devices that rotate their TLS port
-                // immediately after pairing. Do not restart the pairing session.
-                discovery.stopScan()
-                discovery.scanAdbPorts()
-                val refreshed = waitForConnectEndpoint(3_000L)
-                if (refreshed != null && refreshed.port != activeEndpoint.port) {
-                    activeEndpoint = refreshed.copy(host = "127.0.0.1")
-                    initialized = adb.initServer(connectEndpointOverride = activeEndpoint)
-                }
-                if (!initialized) {
-                    error(
-                        "השיוך הצליח, אך החיבור ל־${refreshed?.serial ?: activeEndpoint.serial} נכשל. " +
-                            "בדוק ש-Wireless Debugging עדיין פעיל ונסה שוב. " +
-                            "פלט ADB אחרון: ${adb.outputBufferFile.readText().takeLast(900)}"
-                    )
-                }
+                error(
+                    "השיוך הצליח, אך ADB לא פתח shell מול 127.0.0.1:${activeEndpoint.port}. " +
+                        "בדוק ש-Wireless Debugging עדיין פעיל ונסה שוב. " +
+                        "פלט ADB אחרון: ${adb.outputBufferFile.readText().takeLast(900)}"
+                )
             }
 
-            val devices = adb.getDevices()
-            val expectedSerial = "127.0.0.1:${activeEndpoint.port}"
-            val connectedDevice = devices.firstOrNull {
-                expectedSerial != null && it.equals(expectedSerial, ignoreCase = true)
-            } ?: devices.firstOrNull {
-                it.startsWith("localhost:") || it.startsWith("127.0.0.1:")
-            } ?: error(
-                "השיוך הצליח, אך ADB לא דיווח על ההתקן שחובר. התקנים שאושרו: " +
-                    devices.joinToString(", ").ifBlank { "אין" }
-            )
-
+            // initServer verifies a live ADB shell id check before returning true.
             connected = true
             adb.ensureShellDeathMonitor()
-            resultMessage = "השיוך והחיבור ל־ADB הושלמו: $connectedDevice"
+            resultMessage = "השיוך והחיבור ל־ADB הושלמו: 127.0.0.1:${activeEndpoint.port}"
             PairingNotification.showResult(applicationContext, true, resultMessage)
         } catch (error: Exception) {
             Log.e(TAG, "Wireless Debugging pairing/connection failed", error)
