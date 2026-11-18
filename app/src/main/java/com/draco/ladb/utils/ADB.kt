@@ -121,6 +121,16 @@ class ADB(private val context: Context) {
 
         if (autoShell && secureSettingsGranted) disableMobileDataAlwaysOn()
 
+        var connectEndpoint: AdbConnectEndpoint? = connectEndpointOverride
+        var connectionDeadline = 0L
+        fun remainingTimeoutSeconds(limit: Long): Long {
+            val remainingMillis = connectionDeadline - System.currentTimeMillis()
+            if (remainingMillis <= 0L) {
+                throw IllegalStateException("התקן ADB לא התחבר בתוך שבע שניות.")
+            }
+            return minOf(limit, ((remainingMillis + 999L) / 1_000L).coerceAtLeast(1L))
+        }
+
         if (autoShell) {
             /* Only do wireless debugging steps on compatible versions */
             if (secureSettingsGranted) {
@@ -151,14 +161,12 @@ class ADB(private val context: Context) {
 
             // Every connection attempt performs its own fresh mDNS scan. No Activity,
             // ViewModel or singleton starts discovery in advance or stores an old port.
-            val connectEndpoint = connectEndpointOverride ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (connectEndpoint == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 debug("מאתר פורט TLS חדש של Wireless Debugging באמצעות mDNS…")
-                LocalAdbServiceDiscovery(context).findConnectEndpoint(12_000L)
+                connectEndpoint = LocalAdbServiceDiscovery(context).findConnectEndpoint(12_000L)
                     ?: throw IllegalStateException(
                         "לא נמצא שירות _adb-tls-connect במכשיר. ודא ש-Wireless Debugging פועל ושהמכשיר מחובר ל-Wi-Fi."
                     )
-            } else {
-                null
             }
 
             if (connectEndpoint != null) {
@@ -168,14 +176,7 @@ class ADB(private val context: Context) {
             }
 
             // Keep device connection and shell verification bounded separately from discovery.
-            val connectionDeadline = System.currentTimeMillis() + 7_000L
-            fun remainingTimeoutSeconds(limit: Long): Long {
-                val remainingMillis = connectionDeadline - System.currentTimeMillis()
-                if (remainingMillis <= 0L) {
-                    throw IllegalStateException("התקן ADB לא התחבר בתוך שבע שניות.")
-                }
-                return minOf(limit, ((remainingMillis + 999L) / 1_000L).coerceAtLeast(1L))
-            }
+            connectionDeadline = System.currentTimeMillis() + 7_000L
 
             debug("Starting ADB server...")
             val startResult = captureProcessOutput(
@@ -406,7 +407,8 @@ class ADB(private val context: Context) {
                     continue
                 }
 
-                val watchedProcess = shellProcess ?: run {
+                val watchedProcess = shellProcess
+                if (watchedProcess == null) {
                     Thread.sleep(500)
                     continue
                 }
