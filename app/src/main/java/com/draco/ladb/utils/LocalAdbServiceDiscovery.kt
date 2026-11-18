@@ -37,6 +37,69 @@ class LocalAdbServiceDiscovery(context: Context) {
     private val nsdManager =
         appContext.getSystemService(Context.NSD_SERVICE) as NsdManager
 
+
+    /** Resolve the local IP address for the pairing port shown by Android Settings. */
+    @Suppress("DEPRECATION")
+    fun findPairingHost(pairingPort: Int, timeoutMillis: Long = 8_000L): String? {
+        val found = AtomicReference<String?>(null)
+        val finished = CountDownLatch(1)
+        val resolving = java.util.concurrent.atomic.AtomicBoolean(false)
+        val pending = java.util.concurrent.ConcurrentLinkedQueue<NsdServiceInfo>()
+
+        val listener = object : NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(serviceType: String) = Unit
+            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) { finished.countDown() }
+            override fun onDiscoveryStopped(serviceType: String) { finished.countDown() }
+            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) { finished.countDown() }
+            override fun onServiceLost(serviceInfo: NsdServiceInfo) = Unit
+            override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+                if (!serviceInfo.serviceType.orEmpty().contains("_adb-tls-pairing", true)) return
+                pending.add(serviceInfo)
+                resolveNext()
+            }
+
+            private fun resolveNext() {
+                if (found.get() != null || !resolving.compareAndSet(false, true)) return
+                val next = pending.poll()
+                if (next == null) { resolving.set(false); return }
+                try {
+                    nsdManager.resolveService(next, object : NsdManager.ResolveListener {
+                        override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) {
+                            resolving.set(false)
+                            resolveNext()
+                        }
+                        override fun onServiceResolved(info: NsdServiceInfo) {
+                            try {
+                                val host = info.host
+                                if (info.port == pairingPort && host != null && isAddressOnThisDevice(host)) {
+                                    found.compareAndSet(null, host.hostAddress.substringBefore("%"))
+                                    finished.countDown()
+                                }
+                            } finally {
+                                resolving.set(false)
+                                resolveNext()
+                            }
+                        }
+                    })
+                } catch (_: Exception) {
+                    resolving.set(false)
+                    resolveNext()
+                }
+            }
+        }
+
+        return try {
+            nsdManager.discoverServices("_adb-tls-pairing._tcp.", NsdManager.PROTOCOL_DNS_SD, listener)
+            finished.await(timeoutMillis.coerceAtLeast(1_000L), TimeUnit.MILLISECONDS)
+            found.get()
+        } catch (error: Exception) {
+            Log.w(TAG_LOCAL_ADB_DISCOVERY, "Pairing host discovery failed", error)
+            found.get()
+        } finally {
+            runCatching { nsdManager.stopServiceDiscovery(listener) }
+        }
+    }
+
     @Suppress("DEPRECATION")
     fun findConnectEndpoint(timeoutMillis: Long = 12_000L): AdbConnectEndpoint? {
         val found = AtomicReference<AdbConnectEndpoint?>(null)
@@ -111,7 +174,7 @@ class LocalAdbServiceDiscovery(context: Context) {
                                     return
                                 }
 
-                                val endpoint = AdbConnectEndpoint("127.0.0.1", port, info.serviceName.orEmpty())
+                                val endpoint = AdbConnectEndpoint(host.hostAddress.substringBefore("%"), port, info.serviceName.orEmpty())
                                 if (found.compareAndSet(null, endpoint)) {
                                     Log.i(TAG_LOCAL_ADB_DISCOVERY, "Found fresh local ADB endpoint: ${endpoint.serial}")
                                     finished.countDown()
