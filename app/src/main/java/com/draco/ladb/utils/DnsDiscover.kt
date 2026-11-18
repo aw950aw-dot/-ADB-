@@ -81,7 +81,7 @@ class DnsDiscover private constructor(
         pendingResolves.set(true)
         try {
             nsdManager.discoverServices("_adb-tls-connect._tcp.", NsdManager.PROTOCOL_DNS_SD, discoveryListener)
-            mainHandler.postDelayed({ stopScan() }, 3_000L)
+            mainHandler.postDelayed({ stopScan() }, 9_000L)
         } catch (error: Exception) {
             started = false
             pendingResolves.set(false)
