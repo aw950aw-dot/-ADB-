@@ -126,7 +126,9 @@ class PairingService : Service() {
             // before the code is entered can be stale by the time pairing has completed.
             val nsd = getSystemService(NSD_SERVICE) as NsdManager
             val discovery = DnsDiscover.getInstance(applicationContext, nsd)
-            discovery.stopScan()
+            // Reuse an active scan, or start a new one if the earlier scan expired.
+            // Stopping and immediately restarting NsdManager discovery can race with
+            // Android's asynchronous onDiscoveryStopped callback.
             discovery.scanAdbPorts()
             val endpoint = waitForConnectEndpoint(9_000L) ?: error(
                 "השיוך הצליח, אך Android לא פרסם פורט ADB חדש אחרי השיוך. " +
