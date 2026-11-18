@@ -1,7 +1,6 @@
 package com.draco.ladb.viewmodels
 
 import android.app.Application
-import android.content.Context
 import android.os.Build
 import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
@@ -147,8 +146,9 @@ class MainActivityViewModel(application: Application) : AndroidViewModel(applica
     fun needsToPair(): Boolean {
         val context = getApplication<Application>().applicationContext
 
-        return !sharedPreferences.getBoolean(context.getString(R.string.paired_key), false) &&
-                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            (!sharedPreferences.getBoolean(context.getString(R.string.paired_key), false) ||
+                !adb.hasAdbHostKey())
     }
 
     fun setPairedBefore(value: Boolean) {
