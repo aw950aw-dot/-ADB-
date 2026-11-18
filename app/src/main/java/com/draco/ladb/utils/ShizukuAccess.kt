@@ -255,10 +255,9 @@ object ShizukuAccess {
                     }
                     Log.i(TAG, "Shizuku UserService verified with uid=$uid: ${identity.trim()}")
                     complete(true, identityMessage())
-                }.apply {
-                    isDaemon = true
-                    name = "ShizukuShellVerify"
                 }
+                verifyThread.isDaemon = true
+                verifyThread.name = "ShizukuShellVerify"
                 verifyThread.start()
             }
 
