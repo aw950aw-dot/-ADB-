@@ -180,7 +180,27 @@ object ShizukuAccess {
         val generation = bindingGeneration
         val args = userServiceArgs(context)
 
-        lateinit var timeout: Runnable
+        val timeout = Runnable {
+            val didTimeout = synchronized(lock) {
+                if (generation == bindingGeneration && binding) {
+                    binding = false
+                    remote = null
+                    remoteUid = -1
+                    serviceConnection = null
+                    true
+                } else false
+            }
+            if (didTimeout) {
+                Log.e(TAG, "Shizuku UserService did not connect within ${SERVICE_BIND_TIMEOUT_MS}ms")
+                runCatching { Shizuku.unbindUserService(args, null, true) }
+                complete(
+                    false,
+                    "Shizuku לא הצליח להפעיל את שירות הפקודות בתוך 25 שניות. " +
+                        "בדוק שהשירות הראשי של Shizuku פעיל ועדכן את Shizuku לגרסה עדכנית."
+                )
+            }
+        }
+
         val connection = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
                 mainHandler.removeCallbacks(timeout)
@@ -261,26 +281,6 @@ object ShizukuAccess {
             if (generation == bindingGeneration) serviceConnection = connection
         }
 
-        timeout = Runnable {
-            val didTimeout = synchronized(lock) {
-                if (generation == bindingGeneration && binding) {
-                    binding = false
-                    remote = null
-                    remoteUid = -1
-                    serviceConnection = null
-                    true
-                } else false
-            }
-            if (didTimeout) {
-                Log.e(TAG, "Shizuku UserService did not connect within ${SERVICE_BIND_TIMEOUT_MS}ms")
-                runCatching { Shizuku.unbindUserService(args, connection, true) }
-                complete(
-                    false,
-                    "Shizuku לא הצליח להפעיל את שירות הפקודות בתוך 25 שניות. " +
-                        "בדוק שהשירות הראשי של Shizuku פעיל ועדכן את Shizuku לגרסה עדכנית."
-                )
-            }
-        }
         mainHandler.postDelayed(timeout, SERVICE_BIND_TIMEOUT_MS)
 
         try {
