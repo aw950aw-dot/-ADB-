@@ -128,12 +128,12 @@ class PairingService : Service() {
             val discovery = DnsDiscover.getInstance(applicationContext, nsd)
             val endpoint = DnsDiscover.currentEndpoint() ?: run {
                 discovery.scanAdbPorts()
-                waitForConnectEndpoint(15_000L)
+                waitForConnectEndpoint(3_000L)
             } ?: error(
                 "השיוך הצליח, אך לא נמצאה כתובת שירות ADB לחיבור. " +
                     "השאר את Wireless Debugging פעיל ונסה שוב."
             )
-            var activeEndpoint = endpoint
+            var activeEndpoint = endpoint.copy(host = "127.0.0.1")
             Log.i(TAG, "Found ADB TLS connect endpoint ${activeEndpoint.serial} (${activeEndpoint.serviceName})")
 
             var initialized = adb.initServer(connectEndpointOverride = activeEndpoint)
@@ -142,9 +142,9 @@ class PairingService : Service() {
                 // immediately after pairing. Do not restart the pairing session.
                 discovery.stopScan()
                 discovery.scanAdbPorts()
-                val refreshed = waitForConnectEndpoint(10_000L)
-                if (refreshed != null && refreshed.serial != activeEndpoint.serial) {
-                    activeEndpoint = refreshed
+                val refreshed = waitForConnectEndpoint(3_000L)
+                if (refreshed != null && refreshed.port != activeEndpoint.port) {
+                    activeEndpoint = refreshed.copy(host = "127.0.0.1")
                     initialized = adb.initServer(connectEndpointOverride = activeEndpoint)
                 }
                 if (!initialized) {
@@ -157,7 +157,7 @@ class PairingService : Service() {
             }
 
             val devices = adb.getDevices()
-            val expectedSerial = activeEndpoint.serial
+            val expectedSerial = "127.0.0.1:${activeEndpoint.port}"
             val connectedDevice = devices.firstOrNull {
                 expectedSerial != null && it.equals(expectedSerial, ignoreCase = true)
             } ?: devices.firstOrNull {
