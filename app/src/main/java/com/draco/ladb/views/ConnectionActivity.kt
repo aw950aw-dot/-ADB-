@@ -151,7 +151,10 @@ class ConnectionActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val paired = vm.adb.pair(port.toString(), code, "localhost")
+                    val pairingHost = LocalAdbServiceDiscovery(this@ConnectionActivity)
+                        .findPairingHost(port, 8_000L) ?: "localhost"
+                    statusOnWorker("מאתר את כתובת שירות השיוך המקומי…")
+                    val paired = vm.adb.pair(port.toString(), code, pairingHost)
                     if (!paired) {
                         val details = runCatching {
                             vm.adb.outputBufferFile.readText().takeLast(700)
