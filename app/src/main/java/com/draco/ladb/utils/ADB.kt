@@ -121,16 +121,6 @@ class ADB(private val context: Context) {
 
         if (autoShell && secureSettingsGranted) disableMobileDataAlwaysOn()
 
-        // One shared five-second budget for Wireless ADB startup, connect and shell verification.
-        val connectionDeadline = System.currentTimeMillis() + 5_000L
-        fun remainingTimeoutSeconds(limit: Long): Long {
-            val remainingMillis = connectionDeadline - System.currentTimeMillis()
-            if (remainingMillis <= 0L) {
-                throw IllegalStateException("חיבור Wireless ADB לא הושלם בתוך חמש שניות.")
-            }
-            return minOf(limit, ((remainingMillis + 999L) / 1_000L).coerceAtLeast(1L))
-        }
-
         if (autoShell) {
             /* Only do wireless debugging steps on compatible versions */
             if (secureSettingsGranted) {
@@ -148,58 +138,49 @@ class ADB(private val context: Context) {
                 }
             }
 
-            /* Check again... */
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                if (!isWirelessDebuggingEnabled()) {
-                    debug("Wireless debugging is not enabled!")
-                    debug("Settings -> Developer options -> Wireless debugging")
-                    debug("Waiting for wireless debugging...")
-
-                    while (!isWirelessDebuggingEnabled()) {
-                        if (System.currentTimeMillis() >= connectionDeadline) {
-                            debug("Wireless Debugging לא הופעל בתוך חמש שניות.")
-                            return false
-                        }
-                        Thread.sleep(200)
-                    }
-                }
-            } else {
-                if (!isUSBDebuggingEnabled()) {
-                    debug("USB debugging is not enabled!")
-                    debug("Settings -> Developer options -> USB debugging")
-                    debug("Waiting for USB debugging...")
-
-                    while (!isUSBDebuggingEnabled()) {
-                        if (System.currentTimeMillis() >= connectionDeadline) {
-                            debug("USB Debugging לא הופעל בתוך חמש שניות.")
-                            return false
-                        }
-                        Thread.sleep(200)
-                    }
-                }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !isWirelessDebuggingEnabled()) {
+                throw IllegalStateException(
+                    "Wireless Debugging כבוי. הפעל אותו באפשרויות למפתחים ונסה שוב."
+                )
+            }
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && !isUSBDebuggingEnabled()) {
+                throw IllegalStateException(
+                    "USB Debugging כבוי. הפעל אותו באפשרויות למפתחים ונסה שוב."
+                )
             }
 
-            var connectEndpoint = connectEndpointOverride ?: DnsDiscover.currentEndpoint()
-            val discoveryDeadline = minOf(connectionDeadline, System.currentTimeMillis() + 1_500L)
-            while (connectEndpoint == null && System.currentTimeMillis() < discoveryDeadline) {
-                if (!DnsDiscover.pendingResolves.get() && DnsDiscover.adbPort == null) {
-                    break
-                }
-                debug("מאתר כתובת ADB מאובטחת בשירות mDNS…")
-                Thread.sleep(150L)
-                connectEndpoint = DnsDiscover.currentEndpoint()
+            // Every connection attempt performs its own fresh mDNS scan. No Activity,
+            // ViewModel or singleton starts discovery in advance or stores an old port.
+            val connectEndpoint = connectEndpointOverride ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                debug("מאתר פורט TLS חדש של Wireless Debugging באמצעות mDNS…")
+                LocalAdbServiceDiscovery(context).findConnectEndpoint(12_000L)
+                    ?: throw IllegalStateException(
+                        "לא נמצא שירות _adb-tls-connect במכשיר. ודא ש-Wireless Debugging פועל ושהמכשיר מחובר ל-Wi-Fi."
+                    )
+            } else {
+                null
             }
 
             if (connectEndpoint != null) {
-                debug("נמצאה נקודת חיבור ADB: ${connectEndpoint.serial} (${connectEndpoint.serviceName})")
+                debug("נמצא פורט חיבור חדש: ${connectEndpoint.serial} (${connectEndpoint.serviceName})")
             } else {
-                debug("לא נמצאה נקודת mDNS לחיבור. ממתין לחיבור USB/ADB שכבר אושר.")
+                debug("Android ישן: ממתין לחיבור USB/ADB.")
+            }
+
+            // Keep device connection and shell verification bounded separately from discovery.
+            val connectionDeadline = System.currentTimeMillis() + 7_000L
+            fun remainingTimeoutSeconds(limit: Long): Long {
+                val remainingMillis = connectionDeadline - System.currentTimeMillis()
+                if (remainingMillis <= 0L) {
+                    throw IllegalStateException("התקן ADB לא התחבר בתוך שבע שניות.")
+                }
+                return minOf(limit, ((remainingMillis + 999L) / 1_000L).coerceAtLeast(1L))
             }
 
             debug("Starting ADB server...")
             val startResult = captureProcessOutput(
                 processForAdb(listOf("start-server"), mergeError = true),
-                remainingTimeoutSeconds(2),
+                remainingTimeoutSeconds(3),
                 "הפעלת שרת ADB חרגה מזמן ההמתנה."
             )
             if (startResult.first != 0) {
@@ -210,7 +191,7 @@ class ADB(private val context: Context) {
             if (connectEndpoint != null) {
                 val connectResult = captureProcessOutput(
                     processForAdb(listOf("connect", "127.0.0.1:${connectEndpoint.port}"), mergeError = true),
-                    remainingTimeoutSeconds(2),
+                    remainingTimeoutSeconds(3),
                     "חיבור ADB לנקודה המקומית 127.0.0.1:${connectEndpoint.port} חרג מזמן ההמתנה."
                 )
                 val connectOutput = connectResult.second.trim()
@@ -228,7 +209,7 @@ class ADB(private val context: Context) {
             } else {
                 captureProcessOutput(
                     adb(false, listOf("wait-for-device")),
-                    remainingTimeoutSeconds(3),
+                    remainingTimeoutSeconds(4),
                     "לא נמצא התקן ADB מאושר. הפעל Wireless Debugging או חבר USB."
                 )
             }
@@ -265,7 +246,7 @@ class ADB(private val context: Context) {
 
         shellProcess = if (autoShell) {
             var argList = listOf("shell")
-            val preferredSerial = (connectEndpointOverride ?: DnsDiscover.currentEndpoint())?.let { "127.0.0.1:${it.port}" }
+            val preferredSerial = connectEndpoint?.serial
             val preferredDevice = deviceList.firstOrNull {
                 preferredSerial != null && it.equals(preferredSerial, ignoreCase = true)
             }
@@ -314,7 +295,7 @@ class ADB(private val context: Context) {
                     ?: deviceList.first()
                 val probe = captureProcessOutput(
                     processForAdb(listOf("-s", selectedSerial, "shell", "id"), mergeError = true),
-                    remainingTimeoutSeconds(2),
+                    remainingTimeoutSeconds(3),
                     "בדיקת shell מול ההתקן חרגה מזמן ההמתנה."
                 )
                 if (probe.first != 0 || !Regex("""uid=\d+""").containsMatchIn(probe.second)) {
@@ -425,50 +406,42 @@ class ADB(private val context: Context) {
                     continue
                 }
 
-                val watchedProcess = shellProcess
-                if (watchedProcess == null) {
+                val watchedProcess = shellProcess ?: run {
                     Thread.sleep(500)
                     continue
                 }
-
                 watchedProcess.waitFor()
                 if (shellProcess !== watchedProcess) continue
 
                 shellProcess = null
                 _running.postValue(false)
                 _closed.postValue(true)
-                debug("חיבור ADB נותק. מנסה להתחבר מחדש…")
+                debug("חיבור ADB נותק. מנסה שחזור אחד…")
 
                 runCatching {
                     val killer = adb(false, listOf("kill-server"))
-                    if (!killer.waitFor(5, TimeUnit.SECONDS)) killer.destroyForcibly()
+                    if (!killer.waitFor(3, TimeUnit.SECONDS)) killer.destroyForcibly()
                 }
-                Thread.sleep(3_000)
+                Thread.sleep(1_000)
+
                 val restored = runCatching { initServer() }.getOrDefault(false)
-                if (!restored) {
-                    debug("החיבור מחדש לא הצליח. ממשיך לנסות כל 5 שניות…")
-                    while (!Thread.currentThread().isInterrupted && _running.value != true) {
-                        Thread.sleep(5_000)
-                        if (tryingToPair) continue
-                        val retrySucceeded = runCatching { initServer() }.getOrDefault(false)
-                        if (retrySucceeded) {
-                            _closed.postValue(false)
-                            break
-                        }
-                    }
-                } else {
+                if (restored) {
                     _closed.postValue(false)
+                    debug("החיבור שוחזר.")
+                    continue
                 }
+
+                debug("השחזור האוטומטי נכשל. לחץ על התחבר מחדש כדי לנסות שוב.")
+                _closed.postValue(true)
+                return
             } catch (interrupted: InterruptedException) {
                 Thread.currentThread().interrupt()
-                break
+                return
             } catch (error: Exception) {
                 _running.postValue(false)
-                debug("שגיאה בניטור החיבור: ${error.message ?: "לא ידועה"}")
-                try { Thread.sleep(3_000) } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    break
-                }
+                _closed.postValue(true)
+                debug("ניטור החיבור נעצר: ${error.message ?: "לא ידועה"}. לחץ על התחבר מחדש.")
+                return
             }
         }
     }
