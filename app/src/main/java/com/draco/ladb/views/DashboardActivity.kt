@@ -1,9 +1,6 @@
 package com.draco.ladb.views
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -15,11 +12,9 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AlertDialog
-import androidx.activity.result.contract.ActivityResultContracts
 import com.draco.ladb.utils.ADB
 import com.draco.ladb.utils.UiTheme
 import com.draco.ladb.utils.UiComponents
-import com.draco.ladb.utils.PairingNotification
 import com.draco.ladb.utils.AppDrawer
 import androidx.drawerlayout.widget.DrawerLayout
 
@@ -28,12 +23,6 @@ class DashboardActivity : AppCompatActivity() {
     private val adb by lazy { ADB.getInstance(this) }
     private val palette get() = UiTheme.palette(this)
     private lateinit var connection: TextView
-    private val notificationPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
-            showPairingNotificationIfNeeded()
-            showFirstRunGuideIfNeeded()
-        }
-
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -41,7 +30,7 @@ class DashboardActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         buildDashboard()
         adb.running.observe(this) { updateConnection(it == true) }
-        requestNotificationsThenShowGuide()
+        showFirstRunGuideIfNeeded()
     }
 
     override fun onResume() {
@@ -224,34 +213,14 @@ class DashboardActivity : AppCompatActivity() {
         }
     }
 
-    private fun requestNotificationsThenShowGuide() {
-        val prefs = getSharedPreferences("first_run", MODE_PRIVATE)
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
-            !prefs.getBoolean("notification_permission_requested", false)
-        ) {
-            prefs.edit().putBoolean("notification_permission_requested", true).apply()
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            showPairingNotificationIfNeeded()
-            showFirstRunGuideIfNeeded()
-        }
-    }
-
-    private fun showPairingNotificationIfNeeded() {
-        // Do not leave an idle, persistent notification in the shade.
-        // The connection screen starts discovery only when the user opens pairing settings.
-        if (adb.running.value != true) PairingNotification.cancel(this)
-    }
-
     private fun showFirstRunGuideIfNeeded() {
         val prefs = getSharedPreferences("first_run", MODE_PRIVATE)
         if (prefs.getBoolean("guide_shown", false)) return
         val message = "כדי להתחבר בפעם הראשונה:\n\n" +
-            "1. אם אפשרויות למפתחים עדיין לא מופעלות: פתח הגדרות Android ← אודות הטלפון והקש 7 פעמים על מספר Build.\n\n" +
-            "2. היכנס למסך החיבור ב־ADB SMART ולחץ „פתח מסך צימוד אלחוטי”. אם אין תמיכה בפתיחה ישירה, פתח ניפוי באגים אלחוטי והפעל אותו.\n\n" +
-            "3. בחר „שיוך מכשיר באמצעות קוד”. ADB SMART תאתר את שירות הצימוד ותציג התראת הזנת קוד באופן אוטומטי.\n\n" +
-            "4. הקלד בהתראה את קוד 6 הספרות ואשר. אין צורך להעתיק פורט או להשתמש במסך מפוצל."
+            "1. הפעל Wireless Debugging באפשרויות למפתחים.\n\n" +
+            "2. פתח את מסך החיבור ב־ADB SMART ואת חלון „שיוך מכשיר באמצעות קוד” של Android.\n\n" +
+            "3. הצג את שני המסכים במסך מפוצל או בחלון צף. העתק ל־ADB SMART את פורט השיוך ואת קוד 6 הספרות.\n\n" +
+            "4. לחץ „בצע שיוך וחיבור”. לאחר השיוך ADB SMART תאתר בעצמה את פורט החיבור הנפרד."
         AlertDialog.Builder(this)
             .setTitle("ברוך הבא ל־ADB חכם – מדריך התחברות")
             .setMessage(message)
@@ -278,7 +247,7 @@ class DashboardActivity : AppCompatActivity() {
         connection.background = rounded(
             if (connected) Color.rgb(17, 49, 48) else palette.surfaceAlt, dp(14), palette.outline
         )
-        if (connected) PairingNotification.cancel(this) else showPairingNotificationIfNeeded()
+        // Connection state is shown in the dashboard; pairing uses the dedicated connection screen.
     }
 
     private fun actionButton(label: String, color: Int, action: () -> Unit): TextView =
