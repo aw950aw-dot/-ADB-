@@ -172,7 +172,7 @@ object ShizukuAccess {
                     binding = false
                     serviceConnection = this
                 }
-                Thread {
+                val verifyThread = Thread {
                     val check = runCatching { shell.execute("id", 5_000L) }
                     if (check.isSuccess) {
                         complete(true, identityMessage())
@@ -181,7 +181,10 @@ object ShizukuAccess {
                         complete(false, "שירות Shizuku הופעל אך בדיקת ה-shell נכשלה: " +
                             (check.exceptionOrNull()?.message ?: "שגיאה"))
                     }
-                }.apply { isDaemon = true; name = "ShizukuShellVerify"; start() }
+                }
+                verifyThread.isDaemon = true
+                verifyThread.name = "ShizukuShellVerify"
+                verifyThread.start()
             }
 
             override fun onServiceDisconnected(name: ComponentName?) {
