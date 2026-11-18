@@ -1,5 +1,6 @@
 package com.draco.ladb.utils
 
+import android.content.Context
 import android.content.Intent
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -10,7 +11,7 @@ object ConnectionBackupPrompt {
     fun maybeShow(activity: AppCompatActivity, adb: ADB) {
         if (activity.isFinishing || activity.isDestroyed || !adb.hasAdbHostKey()) return
 
-        val prefs = activity.getSharedPreferences("connection_backup_prompt", AppCompatActivity.MODE_PRIVATE)
+        val prefs = activity.getSharedPreferences("connection_backup_prompt", Context.MODE_PRIVATE)
         if (prefs.getBoolean("backup_completed", false) ||
             prefs.getBoolean("prompted_after_connection", false)
         ) return
