@@ -1,0 +1,150 @@
+name: Apply update ZIP
+
+# How to use (from a phone, no computer needed):
+#   1. In the repo on GitHub: Add file > Upload files, put the ZIP in the  updates/  folder
+#      (create the folder by uploading to "updates/name.zip"), and commit to main.
+#   2. This workflow unpacks the ZIP on top of the existing project, deletes the ZIP,
+#      commits the result, and starts the APK build.
+# Works with: a full "Download ZIP" of the repo, or a ZIP that only has the changed files
+# (paths relative to the repo root, e.g. app/src/main/...). Files are added/overwritten;
+# nothing is ever deleted.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'updates/*.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # commit the unpacked files
+  actions: write    # start the build workflow afterwards
+
+concurrency:
+  group: apply-update
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Unpack ZIP files from updates/ over the project
+        id: apply
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          zips=(updates/*.zip)
+          if [ ${#zips[@]} -eq 0 ]; then
+            echo "No ZIP files in updates/ - nothing to do."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          readarray -t zips < <(printf '%s\n' "${zips[@]}" | sort)
+
+          # Folder that holds the project files: the ZIP root itself, or the single folder
+          # inside it (GitHub's "Download ZIP" wraps everything in <repo>-main/).
+          is_project_root() {
+            local d="$1" m
+            for m in app docs gradle .github build.gradle settings.gradle gradle.properties README.md; do
+              [ -e "$d/$m" ] && return 0
+            done
+            return 1
+          }
+          find_root() {
+            local d="$1"
+            if is_project_root "$d"; then echo "$d"; return; fi
+            local entries=()
+            while IFS= read -r e; do entries+=("$e"); done < <(find "$d" -mindepth 1 -maxdepth 1)
+            if [ "${#entries[@]}" -eq 1 ] && [ -d "${entries[0]}" ]; then
+              find_root "${entries[0]}"; return
+            fi
+            echo "$d"
+          }
+
+          applied=""
+          for zip in "${zips[@]}"; do
+            echo "::group::Applying $zip"
+            tmp="$(mktemp -d)"
+            # exit code 1 only means "warnings" (e.g. unsafe ../ paths were stripped)
+            unzip -q -o "$zip" -d "$tmp" || [ $? -eq 1 ]
+            rm -rf "$tmp/__MACOSX"
+            find "$tmp" -name '.DS_Store' -delete
+            find "$tmp" -type l -delete          # never import symbolic links
+
+            root="$(find_root "$tmp")"
+            if ! is_project_root "$root"; then
+              echo "::error file=$zip::This ZIP does not look like the project (no app/, docs/, gradle files, README.md at its top level). Nothing was changed."
+              exit 1
+            fi
+            if [ -d "$root/.github/workflows" ]; then
+              echo "::warning file=$zip::.github/workflows inside the ZIP is skipped (a workflow cannot update workflow files). Edit those on GitHub directly."
+            fi
+
+            tar -C "$root" \
+              --exclude='./.git' --exclude='*/.git' \
+              --exclude='./.github/workflows' \
+              --exclude='./updates' \
+              -cf - . | tar -C . --no-same-owner --no-overwrite-dir -xf -
+
+            git rm -q -f -- "$zip"
+            applied="$applied $(basename "$zip")"
+            rm -rf "$tmp"
+            echo "::endgroup::"
+          done
+
+          # A ZIP made on a phone may lose the executable bit; Gradle needs it.
+          [ -f gradlew ] && chmod +x gradlew || true
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "The ZIP contained nothing new."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "names=${applied# }" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Update applied"
+              echo
+              echo "ZIP: \`${applied# }\`"
+              echo
+              echo '```'
+              git diff --cached --stat | tail -n 60
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Commit and push
+        if: steps.apply.outputs.changed == 'true'
+        env:
+          BRANCH: ${{ github.ref_name }}
+          NAMES: ${{ steps.apply.outputs.names }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Apply update: $NAMES"
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:$BRANCH"; then exit 0; fi
+            echo "Push rejected (attempt $attempt), rebasing on the latest $BRANCH..."
+            git pull --rebase origin "$BRANCH"
+          done
+          echo "::error::Could not push the update after 3 attempts."
+          exit 1
+
+      # Pushes made with the built-in token do not start other workflows by themselves,
+      # so the APK build is started explicitly.
+      - name: Start the APK build
+        if: steps.apply.outputs.changed == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: gh workflow run bootstrap-and-build.yml --ref "$BRANCH"
