@@ -525,12 +525,23 @@ class ADB(private val context: Context) {
             // always start from a clean server.
             resetAdbServer()
             for (attempt in 1..2) {
-                when (runPairOnce(endpoint, pairingCode, 12L)) {
+                when (runPairOnce(endpoint, pairingCode, 15L)) {
                     PairOutcome.SUCCESS -> return true
                     PairOutcome.REFUSED -> return false
-                    PairOutcome.TIMEOUT -> {
+                    PairOutcome.NO_ANSWER -> {
+                        // The request did reach the adb server, so the code may already be used up.
+                        // Retrying blindly would only make things worse.
+                        debug(
+                            "המכשיר לא ענה לבקשת השיוך. כבה והדלק את 'ניפוי באגים אלחוטי', " +
+                                "פתח חלון התאמה חדש (קוד ופורט חדשים) ונסה שוב."
+                        )
+                        return false
+                    }
+                    PairOutcome.STUCK -> {
+                        // adb never got as far as starting its server, so no request was sent and
+                        // the code is still valid: reset and try once more.
                         if (attempt == 1) {
-                            debug("אין תגובה מ־adb pair. מאפס את שרת ADB ומנסה שוב…")
+                            debug("adb pair נתקע לפני שהתחיל. מאפס את שרת ADB ומנסה שוב…")
                             resetAdbServer()
                         }
                     }
@@ -549,9 +560,12 @@ class ADB(private val context: Context) {
         }
     }
 
-    private enum class PairOutcome { SUCCESS, REFUSED, TIMEOUT }
+    private enum class PairOutcome { SUCCESS, REFUSED, STUCK, NO_ANSWER }
 
-    /** One `adb pair` run. TIMEOUT means "no answer at all"; REFUSED means adb answered with an error. */
+    /**
+     * One `adb pair` run. REFUSED = adb answered with an error. STUCK = adb hung before its server
+     * even started (nothing was sent). NO_ANSWER = the request was sent but the device never replied.
+     */
     private fun runPairOnce(endpoint: String, pairingCode: String, timeoutSeconds: Long): PairOutcome {
         var pairProcess: Process? = null
         try {
@@ -600,7 +614,8 @@ class ADB(private val context: Context) {
                 activeProcess.waitFor(2, TimeUnit.SECONDS)
                 val soFar = synchronized(captured) { captured.toString().trim().takeLast(300) }
                 debug("ADB pairing timed out after ${timeoutSeconds}s. Output so far: " + soFar.ifBlank { "(none)" })
-                return PairOutcome.TIMEOUT
+                return if (soFar.contains("daemon started", ignoreCase = true)) PairOutcome.NO_ANSWER
+                else PairOutcome.STUCK
             }
             outputReader.join(2_000)
             val outputText = synchronized(captured) { captured.toString() }
@@ -631,7 +646,30 @@ class ADB(private val context: Context) {
         }
         val killed = killLeftoverAdbProcesses()
         if (killed > 0) debug("נסגרו $killed תהליכי ADB ישנים שנתקעו.")
-        Thread.sleep(300L)
+        waitForAdbPortClosed(3_000L)
+    }
+
+    /**
+     * kill-server returns before the old server has really gone. A new `adb` client that reaches
+     * the dying server hangs, so wait until nothing listens on the adb port any more.
+     */
+    private fun waitForAdbPortClosed(timeoutMs: Long) {
+        val end = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < end) {
+            val stillOpen = try {
+                java.net.Socket().use { socket ->
+                    socket.connect(java.net.InetSocketAddress("127.0.0.1", 5037), 200)
+                    true
+                }
+            } catch (_: Exception) {
+                false
+            }
+            if (!stillOpen) {
+                Thread.sleep(150L)
+                return
+            }
+            Thread.sleep(150L)
+        }
     }
 
     private fun killLeftoverAdbProcesses(): Int {
