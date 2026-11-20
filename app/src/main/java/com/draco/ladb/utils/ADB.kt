@@ -209,10 +209,28 @@ class ADB(private val context: Context) {
                 val loopbackSerial = "127.0.0.1:" + connectEndpoint.port
                 val candidates = listOf(mdnsSerial, loopbackSerial).distinct()
                 val failures = mutableListOf<String>()
+
+                // A modern adb server connects to a freshly paired Wireless Debugging device by
+                // itself (mDNS). That is how LADB connects, and a second manual connection to the
+                // same device only competes with it, so give it a few seconds first.
+                val autoConnectUntil = minOf(connectionDeadline - 8_000L, System.currentTimeMillis() + 4_000L)
+                val portText = connectEndpoint.port.toString()
+                while (connectedSerial == null && System.currentTimeMillis() < autoConnectUntil) {
+                    val devices = runCatching { getDevices(2L) }.getOrDefault(emptyList())
+                    val auto = devices.firstOrNull { it.contains(portText) || it.contains("_adb-tls-connect") }
+                    if (auto != null) {
+                        connectedSerial = auto
+                        debug("ADB התחבר להתקן בעצמו: $auto")
+                    } else {
+                        Thread.sleep(400L)
+                    }
+                }
+
                 // Two rounds: right after pairing the first TLS connect can be slow or refused.
                 // A timeout or error on one address is only a failure of that attempt; the next
                 // address / round is always tried while the time budget lasts.
                 attempts@ for (round in 1..2) {
+                    if (connectedSerial != null) break@attempts
                     for (serial in candidates) {
                         if (System.currentTimeMillis() >= connectionDeadline - 1_500L) break@attempts
                         val capSeconds = if (round == 1) 8L else 6L
@@ -497,13 +515,46 @@ class ADB(private val context: Context) {
         if (numericPort == null || numericPort !in 1..65535 || !pairingCode.matches(Regex("\\d{6}"))) return false
 
         tryingToPair = true
-        var pairProcess: Process? = null
         try {
             prepareAdbHome()
-            // Drain ADB output while it is running. Waiting before reading can fill the pipe
-            // and make the pairing process appear to hang.
             val cleanHost = host.trim().removePrefix("[").removeSuffix("]").ifBlank { "localhost" }
             val endpoint = if (cleanHost.contains(":")) "[$cleanHost]:$numericPort" else "$cleanHost:$numericPort"
+
+            // A server left over from an earlier attempt can be stuck (for example inside a connect
+            // that never answered). `adb pair` then waits for it forever and prints nothing, so
+            // always start from a clean server.
+            resetAdbServer()
+            for (attempt in 1..2) {
+                when (runPairOnce(endpoint, pairingCode, 12L)) {
+                    PairOutcome.SUCCESS -> return true
+                    PairOutcome.REFUSED -> return false
+                    PairOutcome.TIMEOUT -> {
+                        if (attempt == 1) {
+                            debug("אין תגובה מ־adb pair. מאפס את שרת ADB ומנסה שוב…")
+                            resetAdbServer()
+                        }
+                    }
+                }
+            }
+            return false
+        } catch (error: Exception) {
+            debug("ADB pairing error: ${error.message ?: "unknown error"}")
+            return false
+        } finally {
+            // Match the proven LADB pairing lifecycle: stop the pair session's server,
+            // then let initServer create a clean server for the TLS connection.
+            runCatching { resetAdbServer() }
+                .onFailure { Log.w("ADB", "Could not reset ADB server after pairing", it) }
+            tryingToPair = false
+        }
+    }
+
+    private enum class PairOutcome { SUCCESS, REFUSED, TIMEOUT }
+
+    /** One `adb pair` run. TIMEOUT means "no answer at all"; REFUSED means adb answered with an error. */
+    private fun runPairOnce(endpoint: String, pairingCode: String, timeoutSeconds: Long): PairOutcome {
+        var pairProcess: Process? = null
+        try {
             val activeProcess = ProcessBuilder(adbPath, "pair", endpoint)
                 .directory(context.filesDir)
                 .redirectErrorStream(true)
@@ -515,51 +566,75 @@ class ADB(private val context: Context) {
             pairProcess = activeProcess
 
             val captured = StringBuilder()
+            // Read raw characters, not lines: adb's "Enter pairing code:" prompt has no newline,
+            // so a line reader would show nothing at all while adb waits.
             val outputReader = Thread {
                 runCatching {
-                    activeProcess.inputStream.bufferedReader().useLines { lines ->
-                        lines.forEach { line ->
-                            synchronized(captured) { captured.append(line).append('\n') }
-                            debug("ADB PAIR: $line")
+                    val reader = activeProcess.inputStream.bufferedReader()
+                    val line = StringBuilder()
+                    while (true) {
+                        val code = reader.read()
+                        if (code < 0) break
+                        val ch = code.toChar()
+                        synchronized(captured) { captured.append(ch) }
+                        if (ch == '\n') {
+                            debug("ADB PAIR: " + line.toString().trim())
+                            line.setLength(0)
+                        } else {
+                            line.append(ch)
                         }
                     }
+                    if (line.isNotBlank()) debug("ADB PAIR: " + line.toString().trim())
                 }
             }.apply { isDaemon = true; name = "ADBPairOutput"; start() }
 
-            // Feed the code immediately. ADB reads stdin after its pairing prompt;
-            // the pipe buffers this line, so there is no artificial multi-second delay.
+            // Feed the code immediately; the pipe buffers it until adb asks for it.
             activeProcess.outputStream.bufferedWriter().use { writer ->
                 writer.write(pairingCode)
                 writer.newLine()
                 writer.flush()
             }
 
-            val finished = activeProcess.waitFor(20, TimeUnit.SECONDS)
-            if (!finished) {
+            if (!activeProcess.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                 activeProcess.destroyForcibly()
                 activeProcess.waitFor(2, TimeUnit.SECONDS)
-                debug("ADB pairing timed out.")
-                return false
+                val soFar = synchronized(captured) { captured.toString().trim().takeLast(300) }
+                debug("ADB pairing timed out after ${timeoutSeconds}s. Output so far: " + soFar.ifBlank { "(none)" })
+                return PairOutcome.TIMEOUT
             }
             outputReader.join(2_000)
             val outputText = synchronized(captured) { captured.toString() }
             val success = activeProcess.exitValue() == 0 &&
                 outputText.contains("success", ignoreCase = true)
             if (!success) debug("ADB pairing failed: " + outputText.takeLast(1200))
-            return success
+            return if (success) PairOutcome.SUCCESS else PairOutcome.REFUSED
         } catch (error: Exception) {
             debug("ADB pairing error: ${error.message ?: "unknown error"}")
             runCatching { pairProcess?.destroyForcibly() }
-            return false
-        } finally {
-            // Match the proven LADB pairing lifecycle: stop the pair session's server,
-            // then let initServer create a clean server for the TLS connection.
-            runCatching {
-                val stop = processForAdb(listOf("kill-server"), mergeError = true)
-                captureProcessOutput(stop, 3, "סגירת שרת ADB אחרי שיוך חרגה מזמן ההמתנה.")
-            }.onFailure { Log.w("ADB", "Could not reset ADB server after pairing", it) }
-            tryingToPair = false
+            return PairOutcome.REFUSED
         }
+    }
+
+    /**
+     * Stops the adb server and, if it does not obey (a stuck server ignores kill-server),
+     * force-kills leftover adb processes. They all belong to this app, so this is allowed.
+     */
+    private fun resetAdbServer() {
+        runCatching {
+            captureProcessOutput(
+                processForAdb(listOf("kill-server"), mergeError = true),
+                3,
+                "סגירת שרת ADB חרגה מזמן ההמתנה."
+            )
+        }
+        runCatching {
+            val killer = ProcessBuilder("pkill", "-9", "-f", File(adbPath).name)
+                .redirectErrorStream(true)
+                .start()
+            killer.waitFor(3, TimeUnit.SECONDS)
+            killer.destroyForcibly()
+        }
+        Thread.sleep(200L)
     }
 
     /**
