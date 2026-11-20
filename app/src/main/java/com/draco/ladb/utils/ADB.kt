@@ -617,7 +617,9 @@ class ADB(private val context: Context) {
 
     /**
      * Stops the adb server and, if it does not obey (a stuck server ignores kill-server),
-     * force-kills leftover adb processes. They all belong to this app, so this is allowed.
+     * force-kills every leftover adb process of this app. They all belong to this app's uid,
+     * so Android allows it. Processes are found through /proc, because `pkill` is not
+     * available on every device.
      */
     private fun resetAdbServer() {
         runCatching {
@@ -627,14 +629,26 @@ class ADB(private val context: Context) {
                 "סגירת שרת ADB חרגה מזמן ההמתנה."
             )
         }
-        runCatching {
-            val killer = ProcessBuilder("pkill", "-9", "-f", File(adbPath).name)
-                .redirectErrorStream(true)
-                .start()
-            killer.waitFor(3, TimeUnit.SECONDS)
-            killer.destroyForcibly()
+        val killed = killLeftoverAdbProcesses()
+        if (killed > 0) debug("נסגרו $killed תהליכי ADB ישנים שנתקעו.")
+        Thread.sleep(300L)
+    }
+
+    private fun killLeftoverAdbProcesses(): Int {
+        val adbName = File(adbPath).name
+        val self = android.os.Process.myPid()
+        var killed = 0
+        File("/proc").listFiles()?.forEach { entry ->
+            val pid = entry.name.toIntOrNull() ?: return@forEach
+            if (pid == self) return@forEach
+            val commandLine = runCatching {
+                java.io.FileInputStream(File(entry, "cmdline")).use { String(it.readBytes()) }
+            }.getOrNull() ?: return@forEach
+            if (commandLine.contains(adbName)) {
+                runCatching { android.os.Process.killProcess(pid); killed++ }
+            }
         }
-        Thread.sleep(200L)
+        return killed
     }
 
     /**
