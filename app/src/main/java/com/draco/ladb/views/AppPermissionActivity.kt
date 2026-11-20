@@ -247,7 +247,7 @@ class AppPermissionActivity : AppCompatActivity() {
         busy = true
         val progress = android.app.ProgressDialog.show(this, "מעדכן הרשאות", "מבצע שינויים שאישרת…", true, false)
         lifecycleScope.launch {
-            val reports = withContext(Dispatchers.IO) {
+            val outcome = withContext(Dispatchers.IO) { runCatching {
                 val results = mutableListOf<String>()
                 val userResult = adb.executeShell("am get-current-user", 15)
                 if (userResult.exitCode != 0) error("לא ניתן לזהות את המשתמש הפעיל ב-Android.")
@@ -274,10 +274,20 @@ class AppPermissionActivity : AppCompatActivity() {
                     )
                 }
                 results
-            }
+            } }
             busy = false
-            progress.dismiss()
-            val message = reports.joinToString("\n").ifBlank { "לא נדרשו שינויים." }
+            runCatching { progress.dismiss() }
+            if (isFinishing || isDestroyed) return@launch
+            val failure = outcome.exceptionOrNull()
+            if (failure != null) {
+                AlertDialog.Builder(this@AppPermissionActivity)
+                    .setTitle("עדכון ההרשאות נכשל")
+                    .setMessage(failure.message ?: "Android לא אישר את הפעולה.")
+                    .setPositiveButton("סגור", null)
+                    .show()
+                return@launch
+            }
+            val message = outcome.getOrDefault(emptyList()).joinToString("\n").ifBlank { "לא נדרשו שינויים." }
             AlertDialog.Builder(this@AppPermissionActivity)
                 .setTitle("תוצאות שינוי ההרשאות")
                 .setMessage(message)

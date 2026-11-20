@@ -6,6 +6,7 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import com.draco.ladb.utils.ADB
+import com.draco.ladb.utils.RemoteCommandException
 import com.draco.ladb.utils.RootAccessManager
 import org.json.JSONArray
 import org.json.JSONObject
@@ -14,8 +15,11 @@ import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.InputStream
+import java.io.OutputStream
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.zip.Deflater
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -32,6 +36,9 @@ object AppBackupManager {
     private const val MANIFEST_NAME = "adb-smart-manifest.json"
     private const val MAX_ARCHIVE_ENTRIES = 160
     private const val MAX_UNCOMPRESSED_BYTES = 20L * 1024L * 1024L * 1024L
+    private const val MAX_TAR_META_BYTES = 1L * 1024L * 1024L
+    /** Exit code used by our own `if [ -d ... ]` guard: the directory simply does not exist. */
+    private const val MISSING_DIRECTORY_EXIT = 44
     private val PACKAGE_PATTERN = Regex("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+")
 
     data class AppItem(
@@ -46,7 +53,6 @@ object AppBackupManager {
     data class BackupSummary(
         val packageName: String,
         val appLabel: String,
-        val outputFile: File,
         val rootAvailable: Boolean,
         val privateDataIncluded: Boolean,
         val payloadNames: List<String>,
@@ -68,6 +74,9 @@ object AppBackupManager {
         val sourcePath: String
     )
 
+    /** Outcome of reading one directory as a TAR payload (never throws). */
+    private class TarAttempt(val payload: Payload?, val missing: Boolean, val error: String?)
+
     private data class ExtractedBackup(
         val packageName: String,
         val appLabel: String,
@@ -80,9 +89,10 @@ object AppBackupManager {
 
     fun loadApps(context: Context, includeSystem: Boolean = false): List<AppItem> {
         val pm = context.packageManager
-        val flags = signingFlags()
+        // No signing flags here: loading certificates for every installed package is very slow.
+        // The signature is read only for the single app that is actually backed up.
         @Suppress("DEPRECATION")
-        val installed = pm.getInstalledPackages(flags)
+        val installed = pm.getInstalledPackages(0)
         return installed.mapNotNull { info ->
             val appInfo = info.applicationInfo ?: return@mapNotNull null
             if (info.packageName == context.packageName) return@mapNotNull null
@@ -93,7 +103,13 @@ object AppBackupManager {
         }.sortedWith(compareBy<AppItem> { it.label.lowercase() }.thenBy { it.packageName })
     }
 
-    fun createBackup(context: Context, adb: ADB, packageName: String, outputFile: File): BackupSummary {
+    fun createBackup(
+        context: Context,
+        adb: ADB,
+        packageName: String,
+        output: OutputStream,
+        onProgress: (String) -> Unit = {}
+    ): BackupSummary {
         requirePackageName(packageName)
         check(adb.running.value == true) { "יש להתחבר ל־Wireless Debugging לפני גיבוי." }
         val pm = context.packageManager
@@ -117,6 +133,7 @@ object AppBackupManager {
             apkSources += ApkSource("apk/split_${index}_$safe.apk", split, "split", splitName)
         }
 
+        onProgress("בודק חיבור והרשאות…")
         val userId = currentUserId(adb)
         val rootAvailable = runCatching { RootAccessManager.verifyAccess(context) }.getOrDefault(false)
 
@@ -124,10 +141,12 @@ object AppBackupManager {
         val payloads = mutableListOf<Payload>()
         val notes = mutableListOf<String>()
         try {
+            // ---- private data -------------------------------------------------------------
+            onProgress("קורא נתונים פרטיים של האפליקציה…")
             val privateBase = privateDataBase(context)
             val privatePath = "$privateBase/$packageName"
             val privateTar = File(work, "private-user.tar")
-            val privatePayload = if (rootAvailable) {
+            val privateAttempt = if (rootAvailable) {
                 val inner = "tar -C ${quote(privateBase)} -cpf - ${quote(packageName)}"
                 tryRootTar(privateTar, inner, "private_user", privatePath)
             } else {
@@ -135,26 +154,33 @@ object AppBackupManager {
                 tryTar(adb, privateTar, "run-as $packageName sh -c ${quote(inner)}",
                     "private_user", "RUN_AS", privatePath)
             }
-            if (privatePayload != null) payloads += privatePayload
-            else notes += if (rootAvailable) {
-                "לא ניתן היה לקרוא את נתוני האפליקציה הפרטיים גם עם Root."
+            val privatePayload = privateAttempt.payload
+            if (privatePayload != null) {
+                payloads += privatePayload
             } else {
-                "נתונים פרטיים לא נכללו: נדרש Root או אפליקציה debuggable שתומכת ב־run-as."
+                val reason = privateAttempt.error?.let { " סיבה: $it" }.orEmpty()
+                notes += if (rootAvailable) {
+                    "נתונים פרטיים לא נכללו: Root לא הצליח לקרוא אותם.$reason"
+                } else {
+                    "נתונים פרטיים לא נכללו: נדרש Root או אפליקציה debuggable שתומכת ב־run-as.$reason"
+                }
             }
 
             if (rootAvailable) {
+                onProgress("קורא נתוני Device Protected…")
                 val deviceBase = deviceProtectedDataBase(context)
                 val devicePath = "$deviceBase/$packageName"
-                val deviceTar = File(work, "private-device.tar")
-                val devicePayload = tryRootTar(
-                    deviceTar,
-                    "tar -C ${quote(deviceBase)} -cpf - ${quote(packageName)}",
-                    "private_device", devicePath
-                )
+                val guarded = "if [ -d ${quote(devicePath)} ]; then " +
+                    "tar -C ${quote(deviceBase)} -cpf - ${quote(packageName)}; else exit $MISSING_DIRECTORY_EXIT; fi"
+                val deviceAttempt = tryRootTar(File(work, "private-device.tar"), guarded, "private_device", devicePath)
+                val devicePayload = deviceAttempt.payload
                 if (devicePayload != null) payloads += devicePayload
-                else notes += "נתוני Device Protected לא נכללו: לא ניתן היה לקרוא אותם גם עם Root."
+                else if (!deviceAttempt.missing) {
+                    notes += "נתוני Device Protected לא נכללו: " + (deviceAttempt.error ?: "Root לא הצליח לקרוא אותם.")
+                }
             }
 
+            // ---- shared storage (Android/data, media, obb) --------------------------------
             val externalRoot = externalStorageBase(context)
             if (externalRoot == null) notes += "אחסון חיצוני לא נכלל: Android לא החזיר נתיב אחסון."
             val sharedPaths = externalRoot?.let { root ->
@@ -165,28 +191,25 @@ object AppBackupManager {
                 )
             }.orEmpty()
             sharedPaths.forEach { (type, base, name) ->
+                onProgress("מעתיק $type…")
                 val path = "$base/$packageName"
-                val tar = File(work, name)
                 val plain = "tar -C ${quote(base)} -cpf - ${quote(packageName)}"
-                val first = tryTar(adb, tar, "sh -c ${quote("if [ -d ${quote(path)} ]; then $plain; else exit 44; fi")}",
-                    type, "SHELL", path)
-                if (first != null) {
-                    payloads += first
-                } else if (rootAvailable) {
-                    val rootTar = File(work, "root-$name")
-                    val rootPayload = tryRootTar(
-                        rootTar,
-                        "if [ -d ${quote(path)} ]; then $plain; else exit 44; fi",
-                        type,
-                        path
-                    )
-                    if (rootPayload != null) payloads += rootPayload
-                    else notes += "$type לא נכלל: Android לא אפשר לקרוא את התיקייה."
-                } else {
-                    notes += "$type לא נכלל: נדרשת גישה לתיקייה דרך ADB או Root."
+                val guarded = "if [ -d ${quote(path)} ]; then $plain; else exit $MISSING_DIRECTORY_EXIT; fi"
+                val viaShell = tryTar(adb, File(work, name), "sh -c ${quote(guarded)}", type, "SHELL", path)
+                val attempt = if (viaShell.payload == null && !viaShell.missing && rootAvailable) {
+                    tryRootTar(File(work, "root-$name"), guarded, type, path)
+                } else viaShell
+                val payload = attempt.payload
+                when {
+                    payload != null -> payloads += payload
+                    attempt.missing -> Unit // the app simply has no such directory
+                    else -> notes += "$type לא נכלל: " +
+                        (attempt.error ?: "Android לא אפשר לקרוא את התיקייה.")
                 }
             }
 
+            // ---- manifest + ZIP, streamed straight to the destination ----------------------
+            onProgress("מחשב סכומי בדיקה…")
             val apkJson = JSONArray()
             apkSources.forEach { source ->
                 apkJson.put(JSONObject()
@@ -226,45 +249,31 @@ object AppBackupManager {
             require(archiveNames.distinct().size == archiveNames.size) {
                 "לא ניתן ליצור גיבוי: נמצאו שמות קבצים כפולים בארכיון."
             }
-            val outputParent = outputFile.parentFile ?: context.cacheDir
-            if (!outputParent.exists() && !outputParent.mkdirs()) error("לא ניתן להכין תיקיית גיבוי.")
-            val temporaryOutput = File(outputParent, outputFile.name + ".tmp-" + UUID.randomUUID())
-            val previousOutput = File(outputParent, outputFile.name + ".previous-" + UUID.randomUUID())
-            var previousMoved = false
-            try {
-                ZipOutputStream(BufferedOutputStream(FileOutputStream(temporaryOutput))).use { zip ->
-                    zip.putNextEntry(ZipEntry(MANIFEST_NAME))
-                    zip.write(manifest.toString(2).toByteArray(Charsets.UTF_8))
+
+            onProgress("כותב קובץ ZIP…")
+            ZipOutputStream(BufferedOutputStream(output, 256 * 1024)).use { zip ->
+                zip.setLevel(Deflater.BEST_SPEED)
+                zip.putNextEntry(ZipEntry(MANIFEST_NAME))
+                zip.write(manifest.toString(2).toByteArray(Charsets.UTF_8))
+                zip.closeEntry()
+                // APKs are already compressed: store them without spending CPU on deflate.
+                zip.setLevel(Deflater.NO_COMPRESSION)
+                apkSources.forEach { source ->
+                    onProgress("כותב " + source.entry + "…")
+                    zip.putNextEntry(ZipEntry(source.entry))
+                    FileInputStream(source.file).use { it.copyTo(zip, 64 * 1024) }
                     zip.closeEntry()
-                    apkSources.forEach { source ->
-                        zip.putNextEntry(ZipEntry(source.entry))
-                        FileInputStream(source.file).use { it.copyTo(zip, 64 * 1024) }
-                        zip.closeEntry()
-                    }
-                    payloads.forEach { payload ->
-                        zip.putNextEntry(ZipEntry(payload.entry))
-                        FileInputStream(payload.file).use { it.copyTo(zip, 64 * 1024) }
-                        zip.closeEntry()
-                    }
                 }
-                if (outputFile.exists()) {
-                    if (!outputFile.renameTo(previousOutput)) error("לא ניתן לשמור את קובץ הגיבוי הקודם.")
-                    previousMoved = true
+                zip.setLevel(Deflater.BEST_SPEED)
+                payloads.forEach { payload ->
+                    onProgress("כותב " + payload.entry + "…")
+                    zip.putNextEntry(ZipEntry(payload.entry))
+                    FileInputStream(payload.file).use { it.copyTo(zip, 64 * 1024) }
+                    zip.closeEntry()
                 }
-                if (!temporaryOutput.renameTo(outputFile)) {
-                    if (previousMoved && previousOutput.renameTo(outputFile)) previousMoved = false
-                    error("לא ניתן לשמור את קובץ הגיבוי הסופי.")
-                }
-                if (previousMoved) {
-                    previousOutput.delete()
-                    previousMoved = false
-                }
-            } finally {
-                temporaryOutput.delete()
-                if (previousMoved && !outputFile.exists()) previousOutput.renameTo(outputFile)
             }
             return BackupSummary(
-                packageName, appLabel, outputFile, rootAvailable,
+                packageName, appLabel, rootAvailable,
                 payloads.any { it.type == "private_user" || it.type == "private_device" },
                 payloads.map { it.type }, notes
             )
@@ -273,8 +282,14 @@ object AppBackupManager {
         }
     }
 
-    fun restoreBackup(context: Context, adb: ADB, archive: File): String {
+    fun restoreBackup(
+        context: Context,
+        adb: ADB,
+        archive: InputStream,
+        onProgress: (String) -> Unit = {}
+    ): String {
         check(adb.running.value == true) { "יש להתחבר ל־Wireless Debugging לפני שחזור." }
+        onProgress("קורא ומאמת את קובץ הגיבוי…")
         val backup = extractAndValidate(context, archive)
         try {
             val pm = context.packageManager
@@ -288,6 +303,7 @@ object AppBackupManager {
                 }
             }
             if (installed == null || safeVersionCode(installed) < backup.versionCode) {
+                onProgress("מתקין את האפליקציה…")
                 adb.installApkSet(backup.apks)
                 installed = waitForPackageInfo(pm, backup.packageName, 15_000L)
                     ?: error("ההתקנה הסתיימה, אך Android עדיין לא הציג את האפליקציה ברשימה.")
@@ -307,53 +323,17 @@ object AppBackupManager {
             runCatching { adb.executeShell("am force-stop ${backup.packageName}", 15) }
             val restored = mutableListOf<String>()
             val skipped = mutableListOf<String>()
+            val failures = mutableListOf<String>()
 
             backup.payloads.forEach { payload ->
-                val pkg = backup.packageName
-                val success = when (payload.type) {
-                    "private_user" -> {
-                        if (payload.method == "ROOT" && rootAvailable) {
-                            val base = privateDataBase(context)
-                            val target = "$base/$pkg"
-                            val inner = "mkdir -p ${quote(base)} && tar -xpf - -C ${quote(base)} && " +
-                                "chown -R $appUid:$appUid ${quote(target)} && restorecon -RF ${quote(target)}"
-                            runCatching { RootAccessManager.execInFile(payload.file, inner, 600); true }.getOrDefault(false)
-                        } else if (payload.method == "RUN_AS") {
-                            val target = "${privateDataBase(context)}/$pkg"
-                            val inner = "tar -xpf - -C ${quote(target)}"
-                            runCatching { adb.execInFile(payload.file, "run-as $pkg sh -c ${quote(inner)}", 600).exitCode == 0 }.getOrDefault(false)
-                        } else false
-                    }
-                    "private_device" -> {
-                        if (rootAvailable) {
-                            val base = deviceProtectedDataBase(context)
-                            val target = "$base/$pkg"
-                            val inner = "mkdir -p ${quote(base)} && tar -xpf - -C ${quote(base)} && " +
-                                "chown -R $appUid:$appUid ${quote(target)} && restorecon -RF ${quote(target)}"
-                            runCatching { RootAccessManager.execInFile(payload.file, inner, 600); true }.getOrDefault(false)
-                        } else false
-                    }
-                    "external_data", "external_media", "obb" -> {
-                        val externalRoot = externalStorageBase(context)
-                        if (externalRoot == null) {
-                            false
-                        } else {
-                            val base = when (payload.type) {
-                                "external_data" -> "$externalRoot/Android/data"
-                                "external_media" -> "$externalRoot/Android/media"
-                                else -> "$externalRoot/Android/obb"
-                            }
-                            val inner = "mkdir -p ${quote(base)} && tar -xpf - -C ${quote(base)}"
-                            if (payload.method == "ROOT" && rootAvailable) {
-                                runCatching { RootAccessManager.execInFile(payload.file, inner, 600); true }.getOrDefault(false)
-                            } else {
-                                runCatching { adb.execInFile(payload.file, "sh -c ${quote(inner)}", 600).exitCode == 0 }.getOrDefault(false)
-                            }
-                        }
-                    }
-                    else -> false
+                onProgress("משחזר " + payload.type + "…")
+                val failure = restorePayload(context, adb, backup.packageName, appUid, rootAvailable, payload)
+                if (failure == null) {
+                    restored += payload.type
+                } else {
+                    skipped += payload.type
+                    failures += payload.type + ": " + failure
                 }
-                if (success) restored += payload.type else skipped += payload.type
             }
 
             val privatePayloads = backup.payloads.filter { it.type.startsWith("private_") }
@@ -365,6 +345,7 @@ object AppBackupManager {
                 append("קובצי APK: ${backup.apks.size}\n")
                 if (restored.isNotEmpty()) append("נתונים ששוחזרו: ${restored.distinct().joinToString(", ")}\n")
                 if (skipped.isNotEmpty()) append("נתונים שלא שוחזרו: ${skipped.distinct().joinToString(", ")}\n")
+                if (failures.isNotEmpty()) append("\nסיבות:\n" + failures.joinToString("\n") + "\n")
                 if (privateIncluded && !privateRestored) {
                     append("\nהגיבוי כולל נתונים פרטיים, אך הם לא שוחזרו. לשחזור מלא נדרש Root במכשיר היעד, או run-as לאפליקציה debuggable.")
                 } else if (privateIncluded) {
@@ -380,19 +361,89 @@ object AppBackupManager {
         }
     }
 
+    /** Restores one payload. Returns null on success, otherwise a human readable reason. */
+    private fun restorePayload(
+        context: Context,
+        adb: ADB,
+        pkg: String,
+        appUid: Int,
+        rootAvailable: Boolean,
+        payload: Payload
+    ): String? {
+        return try {
+            when (payload.type) {
+                "private_user" -> when {
+                    payload.method == "ROOT" && rootAvailable -> {
+                        val base = privateDataBase(context)
+                        val target = "$base/$pkg"
+                        // -h: never follow a symlink that came out of the archive when changing owner.
+                        val inner = "mkdir -p ${quote(base)} && tar -xpf - -C ${quote(base)} && " +
+                            "chown -hR $appUid:$appUid ${quote(target)} && restorecon -RF ${quote(target)}"
+                        RootAccessManager.execInFile(payload.file, inner, 600)
+                        null
+                    }
+                    payload.method == "ROOT" -> "הגיבוי נוצר עם Root ולכן נדרש Root גם במכשיר היעד."
+                    payload.method == "RUN_AS" -> {
+                        val target = "${privateDataBase(context)}/$pkg"
+                        val inner = "tar -xpf - -C ${quote(target)}"
+                        val result = adb.execInFile(payload.file, "run-as $pkg sh -c ${quote(inner)}", 600)
+                        if (result.exitCode == 0) null else result.output.ifBlank { "קוד יציאה ${result.exitCode}" }
+                    }
+                    else -> "שיטת שחזור לא נתמכת."
+                }
+                "private_device" -> {
+                    if (!rootAvailable) {
+                        "נדרש Root לשחזור נתוני Device Protected."
+                    } else {
+                        val base = deviceProtectedDataBase(context)
+                        val target = "$base/$pkg"
+                        val inner = "mkdir -p ${quote(base)} && tar -xpf - -C ${quote(base)} && " +
+                            "chown -hR $appUid:$appUid ${quote(target)} && restorecon -RF ${quote(target)}"
+                        RootAccessManager.execInFile(payload.file, inner, 600)
+                        null
+                    }
+                }
+                "external_data", "external_media", "obb" -> {
+                    val externalRoot = externalStorageBase(context)
+                        ?: return "Android לא החזיר נתיב אחסון חיצוני."
+                    val base = when (payload.type) {
+                        "external_data" -> "$externalRoot/Android/data"
+                        "external_media" -> "$externalRoot/Android/media"
+                        else -> "$externalRoot/Android/obb"
+                    }
+                    val inner = "mkdir -p ${quote(base)} && tar -xpf - -C ${quote(base)}"
+                    if (payload.method == "ROOT" && rootAvailable) {
+                        RootAccessManager.execInFile(payload.file, inner, 600)
+                        null
+                    } else {
+                        val result = adb.execInFile(payload.file, "sh -c ${quote(inner)}", 600)
+                        if (result.exitCode == 0) null else result.output.ifBlank { "קוד יציאה ${result.exitCode}" }
+                    }
+                }
+                else -> "סוג נתונים לא מוכר."
+            }
+        } catch (error: Exception) {
+            (error.message ?: error.javaClass.simpleName).take(300)
+        }
+    }
+
     private fun tryRootTar(
         file: File,
         command: String,
         type: String,
         sourcePath: String
-    ): Payload? {
+    ): TarAttempt {
         return try {
             RootAccessManager.execOutToFile(command, file, 600)
             validateTarArchive(file, sourcePath.substringAfterLast('/'))
-            Payload("data/$type.tar", file, type, "ROOT", sourcePath)
-        } catch (_: Exception) {
+            TarAttempt(Payload("data/$type.tar", file, type, "ROOT", sourcePath), false, null)
+        } catch (error: RemoteCommandException) {
             file.delete()
-            null
+            if (error.exitCode == MISSING_DIRECTORY_EXIT) TarAttempt(null, true, null)
+            else TarAttempt(null, false, error.message?.take(300))
+        } catch (error: Exception) {
+            file.delete()
+            TarAttempt(null, false, (error.message ?: error.javaClass.simpleName).take(300))
         }
     }
 
@@ -403,21 +454,22 @@ object AppBackupManager {
         type: String,
         method: String,
         sourcePath: String
-    ): Payload? {
+    ): TarAttempt {
         return try {
             adb.execOutToFile(command, file, 600)
-            if (file.length() <= 0L) null
-            else {
-                validateTarArchive(file, if (method == "RUN_AS") null else sourcePath.substringAfterLast('/'))
-                Payload("data/$type.tar", file, type, method, sourcePath)
-            }
-        } catch (_: Exception) {
+            validateTarArchive(file, if (method == "RUN_AS") null else sourcePath.substringAfterLast('/'))
+            TarAttempt(Payload("data/$type.tar", file, type, method, sourcePath), false, null)
+        } catch (error: RemoteCommandException) {
             file.delete()
-            null
+            if (error.exitCode == MISSING_DIRECTORY_EXIT) TarAttempt(null, true, null)
+            else TarAttempt(null, false, error.message?.take(300))
+        } catch (error: Exception) {
+            file.delete()
+            TarAttempt(null, false, (error.message ?: error.javaClass.simpleName).take(300))
         }
     }
 
-    private fun extractAndValidate(context: Context, archive: File): ExtractedBackup {
+    private fun extractAndValidate(context: Context, archive: InputStream): ExtractedBackup {
         val root = File(context.cacheDir, "restore-${UUID.randomUUID()}").apply { mkdirs() }
         try {
             var manifestText: String? = null
@@ -425,7 +477,7 @@ object AppBackupManager {
             val extracted = linkedMapOf<String, File>()
             var total = 0L
             var count = 0
-            ZipInputStream(BufferedInputStream(FileInputStream(archive))).use { zip ->
+            ZipInputStream(BufferedInputStream(archive, 256 * 1024)).use { zip ->
                 while (true) {
                     val entry = zip.nextEntry ?: break
                     count++
@@ -628,15 +680,24 @@ object AppBackupManager {
     }
 
     /**
-     * Validate TAR paths and reject links/extensions before extraction with Root.
-     * Only ordinary USTAR files and directories are accepted.
+     * Validates a TAR stream before it is ever extracted (possibly with Root).
+     *
+     * Accepted: regular files, directories and symbolic links, plus the GNU long-name (L/K) and
+     * pax (x) extension headers that real archives of app data need for long paths.
+     * Rejected: hard links, devices, absolute or ".." paths, duplicate paths, and any entry that
+     * would be written *through* a symbolic link that the same archive created.
      */
     private fun validateTarArchive(file: File, requiredTopLevel: String? = null) {
         FileInputStream(file).buffered().use { input ->
             val header = ByteArray(512)
-            val seenPaths = mutableSetOf<String>()
+            val seenPaths = HashSet<String>()
+            val symlinkPaths = HashSet<String>()
             var entries = 0
             var totalBytes = 0L
+            var pendingPath: String? = null
+            var pendingLink: String? = null
+            var pendingSize: Long? = null
+
             while (true) {
                 var position = 0
                 while (position < 512) {
@@ -650,39 +711,158 @@ object AppBackupManager {
                 if (header.all { it == 0.toByte() }) return
                 entries++
                 require(entries <= 200_000) { "קובץ TAR מכיל יותר מדי פריטים." }
-                val rawName = tarString(header, 0, 100)
-                val rawPrefix = tarString(header, 345, 155)
-                val rawPath = (if (rawPrefix.isBlank()) rawName else "$rawPrefix/$rawName")
+
                 val type = header[156].toInt().toChar()
-                val path = rawPath.removePrefix("./").let { if (type == '5') it.trimEnd('/') else it }
-                require(type == 0.toChar() || type == '0' || type == '5') {
-                    "הגיבוי כולל קישור או סוג קובץ TAR שאינו נתמך; השחזור נעצר מטעמי בטיחות."
+                val headerSize = parseTarSize(header)
+
+                // ---- extension headers: they describe the NEXT entry -------------------------
+                if (type == 'L' || type == 'K' || type == 'x' || type == 'g') {
+                    require(headerSize in 0L..MAX_TAR_META_BYTES) { "כותרת TAR מורחבת גדולה מדי." }
+                    val data = readFully(input, headerSize.toInt())
+                    skipFully(input, tarPadding(headerSize))
+                    when (type) {
+                        'L' -> pendingPath = cString(data)
+                        'K' -> pendingLink = cString(data)
+                        'x' -> {
+                            val records = parsePax(data)
+                            records["path"]?.let { pendingPath = it }
+                            records["linkpath"]?.let { pendingLink = it }
+                            records["size"]?.let {
+                                pendingSize = it.toLongOrNull()?.takeIf { value -> value >= 0L }
+                                    ?: error("גודל PAX אינו תקין.")
+                            }
+                        }
+                        else -> {
+                            // Global pax headers apply to every later entry; refuse the ones that
+                            // could silently change paths or sizes.
+                            val records = parsePax(data)
+                            require(records.keys.none { it == "path" || it == "linkpath" || it == "size" }) {
+                                "כותרת PAX גלובלית לא נתמכת."
+                            }
+                        }
+                    }
+                    continue
                 }
-                require(isSafeTarPath(path) && (path.isNotEmpty() || type == '5')) { "נתיב לא בטוח בקובץ TAR." }
+
+                // ---- a real entry --------------------------------------------------------------
+                val isRegular = type == 0.toChar() || type == '0'
+                val isDirectory = type == '5'
+                val isSymlink = type == '2'
+                require(isRegular || isDirectory || isSymlink) {
+                    "הגיבוי כולל פריט TAR מסוג שאינו נתמך (קישור קשיח או קובץ מיוחד); השחזור נעצר מטעמי בטיחות."
+                }
+
+                val rawPath = pendingPath ?: run {
+                    val name = tarString(header, 0, 100)
+                    // The prefix field only exists in POSIX ustar headers; GNU headers use those
+                    // bytes for timestamps.
+                    val posix = String(header, 257, 6, Charsets.US_ASCII) == "ustar\u0000"
+                    val prefix = if (posix) tarString(header, 345, 155) else ""
+                    if (prefix.isBlank()) name else "$prefix/$name"
+                }
+                val linkTarget = pendingLink ?: tarString(header, 157, 100)
+                val declaredSize = pendingSize ?: headerSize
+                pendingPath = null
+                pendingLink = null
+                pendingSize = null
+
+                val path = rawPath.removePrefix("./").let { if (isDirectory) it.trimEnd('/') else it }
+                require(isSafeTarPath(path) && (path.isNotEmpty() || isDirectory)) { "נתיב לא בטוח בקובץ TAR." }
                 if (path.isNotEmpty()) {
                     require(seenPaths.add(path)) { "קובץ TAR מכיל פריט כפול: $path" }
-                }
-                if (requiredTopLevel != null && path.isNotEmpty()) {
-                    require(path.substringBefore('/') == requiredTopLevel) {
-                        "קובץ TAR מכיל נתיב שאינו שייך לאפליקציה שבגיבוי."
+                    val parts = path.split('/')
+                    var prefixPath = ""
+                    for (index in 0 until parts.size - 1) {
+                        prefixPath = if (prefixPath.isEmpty()) parts[index] else prefixPath + "/" + parts[index]
+                        require(prefixPath !in symlinkPaths) {
+                            "קובץ TAR מנסה לכתוב דרך קישור סימבולי: $path"
+                        }
+                    }
+                    if (requiredTopLevel != null) {
+                        require(parts.first() == requiredTopLevel) {
+                            "קובץ TAR מכיל נתיב שאינו שייך לאפליקציה שבגיבוי."
+                        }
                     }
                 }
-                val sizeText = tarString(header, 124, 12).trim()
-                val size = if (sizeText.isBlank()) 0L else sizeText.trimStart('0').ifBlank { "0" }.toLongOrNull(8)
-                    ?: error("גודל פריט TAR אינו תקין.")
-                require(size >= 0L) { "גודל פריט TAR אינו תקין." }
-                totalBytes += size
+                if (isSymlink) {
+                    require(path.isNotEmpty() && linkTarget.isNotEmpty() && linkTarget.none { it.code < 32 }) {
+                        "קישור סימבולי לא תקין בקובץ TAR."
+                    }
+                    symlinkPaths.add(path)
+                }
+
+                // Only regular files carry data; directories and links are header-only.
+                val dataSize = if (isRegular) declaredSize else 0L
+                require(dataSize >= 0L) { "גודל פריט TAR אינו תקין." }
+                totalBytes += dataSize
                 require(totalBytes <= MAX_UNCOMPRESSED_BYTES) { "קובץ TAR גדול מדי." }
-                var remaining = ((size + 511L) / 512L) * 512L
-                while (remaining > 0) {
-                    val skipped = input.skip(remaining)
-                    if (skipped > 0) remaining -= skipped
-                    else {
-                        val one = input.read()
-                        require(one >= 0) { "קובץ TAR מסתיים לפני סוף הנתונים." }
-                        remaining--
-                    }
-                }
+                skipFully(input, dataSize + tarPadding(dataSize))
+            }
+        }
+    }
+
+    private fun tarPadding(size: Long): Long = (512L - size % 512L) % 512L
+
+    private fun parseTarSize(header: ByteArray): Long {
+        if ((header[124].toInt() and 0x80) != 0) {
+            // GNU base-256 encoding, used for entries of 8 GiB and larger.
+            var value = (header[124].toInt() and 0x7f).toLong()
+            for (index in 125 until 136) {
+                require(value <= (Long.MAX_VALUE shr 8)) { "גודל פריט TAR אינו תקין." }
+                value = (value shl 8) or (header[index].toLong() and 0xffL)
+            }
+            return value
+        }
+        val text = tarString(header, 124, 12).trim()
+        if (text.isEmpty()) return 0L
+        return text.toLongOrNull(8) ?: error("גודל פריט TAR אינו תקין.")
+    }
+
+    private fun cString(data: ByteArray): String {
+        var end = 0
+        while (end < data.size && data[end] != 0.toByte()) end++
+        return String(data, 0, end, Charsets.UTF_8)
+    }
+
+    /** Parses pax records of the form "<length> <key>=<value>\n". */
+    private fun parsePax(data: ByteArray): Map<String, String> {
+        val result = HashMap<String, String>()
+        var position = 0
+        while (position < data.size) {
+            var space = position
+            while (space < data.size && data[space] != ' '.code.toByte()) space++
+            require(space < data.size) { "רשומת PAX פגומה." }
+            val length = String(data, position, space - position, Charsets.US_ASCII).toIntOrNull()
+                ?: error("רשומת PAX פגומה.")
+            require(length >= space - position + 2 && position + length <= data.size) { "רשומת PAX פגומה." }
+            val record = String(data, space + 1, position + length - space - 2, Charsets.UTF_8)
+            val equals = record.indexOf('=')
+            if (equals > 0) result[record.substring(0, equals)] = record.substring(equals + 1)
+            position += length
+        }
+        return result
+    }
+
+    private fun readFully(input: InputStream, length: Int): ByteArray {
+        val data = ByteArray(length)
+        var offset = 0
+        while (offset < length) {
+            val count = input.read(data, offset, length - offset)
+            require(count >= 0) { "קובץ TAR מסתיים לפני סוף הנתונים." }
+            offset += count
+        }
+        return data
+    }
+
+    private fun skipFully(input: InputStream, length: Long) {
+        var remaining = length
+        while (remaining > 0) {
+            val skipped = input.skip(remaining)
+            if (skipped > 0) {
+                remaining -= skipped
+            } else {
+                require(input.read() >= 0) { "קובץ TAR מסתיים לפני סוף הנתונים." }
+                remaining--
             }
         }
     }

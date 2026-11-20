@@ -1,6 +1,5 @@
 package com.draco.ladb.views
 
-import android.app.ProgressDialog
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
@@ -19,7 +18,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.lifecycle.lifecycleScope
 import com.draco.ladb.backup.AppBackupManager
+import com.draco.ladb.services.BackupService
 import com.draco.ladb.utils.ADB
+import com.draco.ladb.utils.JobProgressHost
 import com.draco.ladb.utils.UiTheme
 import com.draco.ladb.utils.UiComponents
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +36,7 @@ class AppBackupPickerActivity : AppCompatActivity() {
     private lateinit var search: EditText
     private lateinit var includeSystem: androidx.appcompat.widget.SwitchCompat
     private lateinit var count: TextView
+    private lateinit var jobHost: JobProgressHost
     private var apps: List<AppBackupManager.AppItem> = emptyList()
     private var filteredApps: List<AppBackupManager.AppItem> = emptyList()
     private var loadError: String? = null
@@ -56,11 +58,13 @@ class AppBackupPickerActivity : AppCompatActivity() {
         UiTheme.applySavedMode(this)
         super.onCreate(savedInstanceState)
         buildScreen()
+        jobHost = JobProgressHost(this).also { it.attach() }
         reloadApps()
     }
 
     override fun onDestroy() {
         searchHandler.removeCallbacksAndMessages(null)
+        jobHost.detach()
         super.onDestroy()
     }
 
@@ -255,44 +259,10 @@ class AppBackupPickerActivity : AppCompatActivity() {
     }
 
     private fun exportToUri(packageName: String, uri: android.net.Uri) {
-        val progress = ProgressDialog.show(this, "יוצר גיבוי", "קורא APK ונתונים דרך ADB ו־Root…", true, false)
-        lifecycleScope.launch {
-            val outcome = withContext(Dispatchers.IO) {
-                val file = File(cacheDir, "exports/${packageName}-${System.currentTimeMillis()}.zip")
-                try {
-                    val summary = AppBackupManager.createBackup(this@AppBackupPickerActivity, adb, packageName, file)
-                    contentResolver.openOutputStream(uri, "w")?.use { output ->
-                        file.inputStream().use { it.copyTo(output, 64 * 1024) }
-                    } ?: error("לא ניתן לכתוב למיקום שנבחר.")
-                    summary to null
-                } catch (e: Exception) {
-                    null to (e.message ?: "שגיאת גיבוי לא ידועה")
-                } finally {
-                    file.delete()
-                }
-            }
-            progress.dismiss()
-            val summary = outcome.first
-            if (summary == null) {
-                AlertDialog.Builder(this@AppBackupPickerActivity)
-                    .setTitle("הגיבוי נכשל")
-                    .setMessage(outcome.second ?: "לא ניתן ליצור גיבוי.")
-                    .setPositiveButton("סגור", null)
-                    .show()
-            } else {
-                val details = buildString {
-                    append("נוצר גיבוי עבור ${summary.appLabel}.\n\n")
-                    append(if (summary.rootAvailable) "Root זמין במכשיר המקור.\n" else "Root לא זמין במכשיר המקור.\n")
-                    append(if (summary.privateDataIncluded) "נתונים פרטיים: נכללו.\n" else "נתונים פרטיים: לא נכללו.\n")
-                    append("סוגי נתונים שנכללו: ${summary.payloadNames.joinToString().ifBlank { "אין" }}\n")
-                    if (summary.notes.isNotEmpty()) append("\nהערות:\n" + summary.notes.joinToString("\n"))
-                }
-                AlertDialog.Builder(this@AppBackupPickerActivity)
-                    .setTitle("הגיבוי הושלם")
-                    .setMessage(details)
-                    .setPositiveButton("אישור", null)
-                    .show()
-            }
+        JobProgressHost.ensureNotificationPermission(this)
+        // The job runs in a foreground service and streams the ZIP straight to the chosen file.
+        if (!BackupService.startBackup(this, packageName, uri)) {
+            Toast.makeText(this, "גיבוי או שחזור אחר כבר רץ. המתן לסיומו.", Toast.LENGTH_LONG).show()
         }
     }
 

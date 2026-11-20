@@ -105,11 +105,12 @@ object UiComponents {
             val bars = windowInsets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
             )
+            val keyboard = windowInsets.getInsets(WindowInsetsCompat.Type.ime())
             view.setPadding(
                 baseLeft + bars.left,
                 baseTop + bars.top,
                 baseRight + bars.right,
-                baseBottom + bars.bottom
+                baseBottom + maxOf(bars.bottom, keyboard.bottom)
             )
             WindowInsetsCompat.CONSUMED
         }

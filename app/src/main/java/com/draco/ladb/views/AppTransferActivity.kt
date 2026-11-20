@@ -1,6 +1,5 @@
 package com.draco.ladb.views
 
-import android.app.ProgressDialog
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
@@ -18,7 +17,9 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.draco.ladb.backup.AppBackupManager
+import com.draco.ladb.services.BackupService
 import com.draco.ladb.utils.ADB
+import com.draco.ladb.utils.JobProgressHost
 import com.draco.ladb.utils.UiTheme
 import com.draco.ladb.utils.UiComponents
 import kotlinx.coroutines.Dispatchers
@@ -37,13 +38,21 @@ class AppTransferActivity : AppCompatActivity() {
         if (uri != null) restoreFromUri(uri)
     }
 
+    private lateinit var jobHost: JobProgressHost
+
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         UiTheme.applySavedMode(this)
         super.onCreate(savedInstanceState)
         buildScreen()
+        jobHost = JobProgressHost(this).also { it.attach() }
         adb.running.observe(this) { updateStatus(it == true) }
+    }
+
+    override fun onDestroy() {
+        jobHost.detach()
+        super.onDestroy()
     }
 
     override fun onResume() {
@@ -182,27 +191,10 @@ class AppTransferActivity : AppCompatActivity() {
     }
 
     private fun performRestore(uri: Uri) {
-        val progress = ProgressDialog.show(this, "משחזר אפליקציה", "בודק את הגיבוי ומשחזר…", true, false)
-        lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                val temp = File(cacheDir, "restore-${System.currentTimeMillis()}.zip")
-                try {
-                    contentResolver.openInputStream(uri)?.use { input ->
-                        temp.outputStream().use { output -> input.copyTo(output, 64 * 1024) }
-                    } ?: error("לא ניתן לקרוא את קובץ הגיבוי.")
-                    AppBackupManager.restoreBackup(this@AppTransferActivity, adb, temp) to null
-                } catch (e: Exception) {
-                    null to (e.message ?: "שגיאת שחזור לא ידועה")
-                } finally {
-                    temp.delete()
-                }
-            }
-            progress.dismiss()
-            AlertDialog.Builder(this@AppTransferActivity)
-                .setTitle(if (result.first != null) "תוצאות השחזור" else "השחזור נכשל")
-                .setMessage(result.first ?: result.second ?: "לא ניתן לשחזר את הגיבוי.")
-                .setPositiveButton("סגור", null)
-                .show()
+        JobProgressHost.ensureNotificationPermission(this)
+        // The job runs in a foreground service and reads the ZIP straight from the chosen file.
+        if (!BackupService.startRestore(this, uri)) {
+            Toast.makeText(this, "גיבוי או שחזור אחר כבר רץ. המתן לסיומו.", Toast.LENGTH_LONG).show()
         }
     }
 

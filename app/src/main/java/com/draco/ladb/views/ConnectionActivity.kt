@@ -42,6 +42,11 @@ class ConnectionActivity : AppCompatActivity() {
 
     @Volatile private var operationInProgress = false
 
+    private companion object {
+        const val STATE_PORT = "pairing_port"
+        const val STATE_CODE = "pairing_code"
+    }
+
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,6 +54,11 @@ class ConnectionActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         ShizukuAccess.initialize(this)
         buildScreen()
+        // Entering split-screen / a floating window must not wipe what the user already typed.
+        savedInstanceState?.let {
+            pairingPort.setText(it.getString(STATE_PORT, ""))
+            pairingCode.setText(it.getString(STATE_CODE, ""))
+        }
 
         vm.adb.running.observe(this) { connected ->
             if (connected == true) {
@@ -63,6 +73,12 @@ class ConnectionActivity : AppCompatActivity() {
         } else {
             showDisconnected()
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        if (::pairingPort.isInitialized) outState.putString(STATE_PORT, pairingPort.text.toString())
+        if (::pairingCode.isInitialized) outState.putString(STATE_CODE, pairingCode.text.toString())
     }
 
     private fun showConnected(message: String) {
@@ -151,9 +167,12 @@ class ConnectionActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val pairingHost = LocalAdbServiceDiscovery(this@ConnectionActivity)
-                        .findPairingHost(port, 8_000L) ?: "localhost"
                     statusOnWorker("מאתר את כתובת שירות השיוך המקומי…")
+                    // Short wait: the pairing code is only valid while Android's dialog is open,
+                    // so we must not burn many seconds before the actual `adb pair`.
+                    val pairingHost = LocalAdbServiceDiscovery(this@ConnectionActivity)
+                        .findPairingHost(port, 2_500L) ?: "localhost"
+                    statusOnWorker("מבצע שיוך מול " + pairingHost + ":" + port + "…")
                     val paired = vm.adb.pair(port.toString(), code, pairingHost)
                     if (!paired) {
                         val details = runCatching {

@@ -22,6 +22,9 @@ class ADB(private val context: Context) {
         const val MAX_OUTPUT_BUFFER_SIZE = 512 * 1024
         const val OUTPUT_BUFFER_DELAY_MS = 250L
 
+        /** Total budget for start-server + connect + shell verification of one connection attempt. */
+        const val CONNECT_BUDGET_MS = 20_000L
+
         @SuppressLint("StaticFieldLeak")
         @Volatile
         private var instance: ADB? = null
@@ -54,6 +57,13 @@ class ADB(private val context: Context) {
     val running: LiveData<Boolean> = _running
 
     @Volatile private var tryingToPair = false
+
+    /**
+     * Serial of the device that every non-interactive adb call must target. It is passed to the
+     * adb client through ANDROID_SERIAL so that a second device entry (for example an mDNS
+     * auto-connected duplicate) can never cause "more than one device/emulator".
+     */
+    @Volatile private var activeSerial: String? = null
     @Volatile private var shizukuBackendEnabled = false
 
     /**
@@ -113,6 +123,7 @@ class ADB(private val context: Context) {
 
         tryingToPair = true
         try {
+        activeSerial = null
         prepareAdbHome()
         val autoShell = sharedPrefs.getBoolean(context.getString(R.string.auto_shell_key), true)
 
@@ -122,11 +133,13 @@ class ADB(private val context: Context) {
         if (autoShell && secureSettingsGranted) disableMobileDataAlwaysOn()
 
         var connectEndpoint: AdbConnectEndpoint? = connectEndpointOverride
+        // The serial adb really connected with (127.0.0.1:<port> or the mDNS host:port).
+        var connectedSerial: String? = null
         var connectionDeadline = 0L
         fun remainingTimeoutSeconds(limit: Long): Long {
             val remainingMillis = connectionDeadline - System.currentTimeMillis()
             if (remainingMillis <= 0L) {
-                throw IllegalStateException("התקן ADB לא התחבר בתוך שבע שניות.")
+                throw IllegalStateException("התקן ADB לא התחבר בתוך ${CONNECT_BUDGET_MS / 1_000L} שניות.")
             }
             return minOf(limit, ((remainingMillis + 999L) / 1_000L).coerceAtLeast(1L))
         }
@@ -176,12 +189,12 @@ class ADB(private val context: Context) {
             }
 
             // Keep device connection and shell verification bounded separately from discovery.
-            connectionDeadline = System.currentTimeMillis() + 7_000L
+            connectionDeadline = System.currentTimeMillis() + CONNECT_BUDGET_MS
 
             debug("Starting ADB server...")
             val startResult = captureProcessOutput(
                 processForAdb(listOf("start-server"), mergeError = true),
-                remainingTimeoutSeconds(3),
+                remainingTimeoutSeconds(8),
                 "הפעלת שרת ADB חרגה מזמן ההמתנה."
             )
             if (startResult.first != 0) {
@@ -190,15 +203,16 @@ class ADB(private val context: Context) {
             }
 
             if (connectEndpoint != null) {
-                val primarySerial = connectEndpoint.serial
-                val fallbackSerial = "127.0.0.1:" + connectEndpoint.port
-                val candidates = listOf(primarySerial, fallbackSerial).distinct()
-                var connectedSerial: String? = null
+                // Loopback first: it does not depend on the current Wi-Fi address, so it keeps
+                // working after the network changes. The mDNS host is only a fallback.
+                val loopbackSerial = "127.0.0.1:" + connectEndpoint.port
+                val mdnsSerial = connectEndpoint.serial
+                val candidates = listOf(loopbackSerial, mdnsSerial).distinct()
                 val failures = mutableListOf<String>()
                 for (serial in candidates) {
                     val connectResult = captureProcessOutput(
                         processForAdb(listOf("connect", serial), mergeError = true),
-                        remainingTimeoutSeconds(3),
+                        remainingTimeoutSeconds(6),
                         "חיבור ADB אל $serial חרג מזמן ההמתנה."
                     )
                     val output = connectResult.second.trim()
@@ -221,7 +235,7 @@ class ADB(private val context: Context) {
                 )
             }
 
-            val expectedSerial = connectEndpoint?.serial
+            val expectedSerial = connectedSerial
             val deviceDeadline = connectionDeadline
             var deviceList = emptyList<String>()
             while (System.currentTimeMillis() < deviceDeadline) {
@@ -253,7 +267,7 @@ class ADB(private val context: Context) {
 
         shellProcess = if (autoShell) {
             var argList = listOf("shell")
-            val preferredSerial = connectEndpoint?.serial
+            val preferredSerial = connectedSerial
             val preferredDevice = deviceList.firstOrNull {
                 preferredSerial != null && it.equals(preferredSerial, ignoreCase = true)
             }
@@ -300,9 +314,11 @@ class ADB(private val context: Context) {
             if (autoShell) {
                 val selectedSerial = argList.getOrNull(1)?.takeIf { argList.firstOrNull() == "-s" }
                     ?: deviceList.first()
+                // From now on every adb call (install, exec-out, shell ...) targets this device.
+                activeSerial = selectedSerial
                 val probe = captureProcessOutput(
                     processForAdb(listOf("-s", selectedSerial, "shell", "id"), mergeError = true),
-                    remainingTimeoutSeconds(3),
+                    remainingTimeoutSeconds(6),
                     "בדיקת shell מול ההתקן חרגה מזמן ההמתנה."
                 )
                 if (probe.first != 0 || !Regex("""uid=\d+""").containsMatchIn(probe.second)) {
@@ -532,15 +548,8 @@ class ADB(private val context: Context) {
      */
     fun installApk(file: File): String {
         if (!file.exists() || !file.isFile) throw IllegalArgumentException("קובץ APK לא נמצא")
-        if (_running.value != true) throw IllegalStateException("אין חיבור ADB פעיל")
-        val process = ProcessBuilder(adbPath, "install", "-r", file.absolutePath)
-            .directory(context.filesDir)
-            .redirectErrorStream(true)
-            .apply {
-                environment().put("HOME", context.filesDir.path)
-                environment().put("TMPDIR", context.cacheDir.path)
-            }
-            .start()
+        requireAdbBinaryBackend()
+        val process = processForAdb(listOf("install", "-r", file.absolutePath), mergeError = true)
         val (exitCode, capturedOutput) = captureProcessOutput(process, 120, "התקנת APK חרגה מזמן ההמתנה")
         val output = capturedOutput.trim()
         debug("APK INSTALL: " + file.name + "\n" + output)
@@ -571,6 +580,7 @@ class ADB(private val context: Context) {
                 environment().apply {
                     put("HOME", context.filesDir.path)
                     put("TMPDIR", context.cacheDir.path)
+                    activeSerial?.let { put("ANDROID_SERIAL", it) }
                 }
             }
         val process = processBuilder.start()
@@ -694,23 +704,51 @@ class ADB(private val context: Context) {
                 if (mergeError) redirectErrorStream(true)
                 environment().put("HOME", context.filesDir.path)
                 environment().put("TMPDIR", context.cacheDir.path)
+                activeSerial?.let { environment().put("ANDROID_SERIAL", it) }
             }
             .start()
+    }
+
+    /**
+     * Binary transfers and APK installs go through the bundled adb client, which only exists in
+     * Wireless-ADB mode. Fail with a clear message instead of an obscure adb error under Shizuku.
+     */
+    private fun requireAdbBinaryBackend() {
+        if (shizukuBackendEnabled) {
+            throw IllegalStateException(
+                "הפעולה הזו (גיבוי, שחזור או התקנת APK) נתמכת רק דרך Wireless Debugging ולא דרך Shizuku. " +
+                    "התחבר דרך Wireless Debugging ונסה שוב."
+            )
+        }
+        if (_running.value != true) throw IllegalStateException("אין חיבור ADB פעיל")
     }
 
     private fun remoteStatusPath(): String =
         "/data/local/tmp/.adb-smart-${java.util.UUID.randomUUID().toString().replace("-", "")}.status"
 
+    /**
+     * exec-out / exec-in use the raw (non shell-v2) protocol, so the real exit code is lost and
+     * stderr would be mixed into the binary stream. The command therefore runs in a subshell whose
+     * stderr goes to a side file; the exit code goes to a second file. Both are read afterwards.
+     */
     private fun wrapWithRemoteStatus(command: String, statusPath: String): String =
-        "$command; __adb_status=\$?; printf '%s' \"\$__adb_status\" > '$statusPath'"
+        "( $command ) 2>'${statusPath}.err'; __adb_status=\$?; printf '%s' \"\$__adb_status\" > '$statusPath'"
 
-    private fun consumeRemoteStatus(statusPath: String): Int {
+    /** Returns the remote exit code and whatever the command wrote to stderr. */
+    private fun consumeRemoteStatus(statusPath: String): Pair<Int, String> {
         val result = executeShell(
-            "if [ -f '$statusPath' ]; then cat '$statusPath'; rm -f '$statusPath'; else printf missing; fi",
+            "if [ -f '$statusPath' ]; then cat '$statusPath'; else printf missing; fi; " +
+                "printf '\\n---ERR---\\n'; head -c 2000 '${statusPath}.err' 2>/dev/null; " +
+                "rm -f '$statusPath' '${statusPath}.err'",
             20
         )
-        return result.output.trim().toIntOrNull()
-            ?: throw IllegalStateException("לא התקבל קוד ביצוע מהמכשיר המרוחק: ${result.output}")
+        val marker = "---ERR---"
+        val index = result.output.indexOf(marker)
+        val head = if (index >= 0) result.output.substring(0, index) else result.output
+        val errorText = if (index >= 0) result.output.substring(index + marker.length).trim() else ""
+        val code = head.trim().toIntOrNull()
+            ?: throw IllegalStateException("לא התקבל קוד ביצוע מהמכשיר המרוחק: ${result.output.take(300)}")
+        return code to errorText
     }
 
     /** Executes one bounded command through the authorized local Wireless ADB connection. */
@@ -742,7 +780,10 @@ class ADB(private val context: Context) {
             return ShizukuAccess.executeShell(command, timeoutSeconds)
         }
         if (_running.value != true) throw IllegalStateException("אין חיבור ADB פעיל")
-        val process = processForAdb(listOf("shell", "sh", "-c", command), mergeError = true)
+        // The command is ONE argument: adb joins arguments with spaces without any escaping, so the
+        // old `shell sh -c <command>` form broke every command that contains a space.
+        val process = processForAdb(listOf("shell", command), mergeError = true)
+        runCatching { process.outputStream.close() } // remote stdin gets EOF; nothing waits for input
         val (exitCode, output) = captureProcessOutput(process, timeoutSeconds, "פקודת ADB חרגה מזמן ההמתנה")
         return CommandResult(exitCode, output.trim())
     }
@@ -750,11 +791,12 @@ class ADB(private val context: Context) {
     /** Streams binary stdout from adb exec-out to a local file without converting it to text. */
     fun execOutToFile(command: String, destination: File, timeoutSeconds: Long = 300): CommandResult {
         require(command.isNotBlank() && command.length <= 12_000) { "Invalid shell command" }
-        if (_running.value != true) throw IllegalStateException("אין חיבור ADB פעיל")
+        requireAdbBinaryBackend()
         destination.parentFile?.mkdirs()
         val statusPath = remoteStatusPath()
         val wrapped = wrapWithRemoteStatus(command, statusPath)
-        val process = processForAdb(listOf("exec-out", "sh", "-c", wrapped))
+        val process = processForAdb(listOf("exec-out", wrapped))
+        runCatching { process.outputStream.close() }
         val errorText = StringBuilder()
         val stdoutThread = Thread {
             runCatching {
@@ -787,25 +829,33 @@ class ADB(private val context: Context) {
             destination.delete()
             throw IllegalStateException(errorText.toString().ifBlank { "העברת הנתונים דרך ADB נכשלה" })
         }
-        val remoteExit = try { consumeRemoteStatus(statusPath) } catch (e: Exception) {
+        val (remoteExit, remoteError) = try { consumeRemoteStatus(statusPath) } catch (e: Exception) {
             destination.delete()
             throw e
         }
-        if (remoteExit != 0 || !destination.isFile || destination.length() == 0L) {
+        if (remoteExit != 0) {
             destination.delete()
-            throw IllegalStateException(errorText.toString().ifBlank { "פקודת הקריאה במכשיר נכשלה (קוד $remoteExit)" })
+            val reason = remoteError.ifBlank { errorText.toString().trim() }
+                .ifBlank { "פקודת הקריאה במכשיר נכשלה (קוד $remoteExit)" }
+            throw RemoteCommandException(remoteExit, reason)
         }
-        return CommandResult(remoteExit, errorText.toString().trim())
+        if (!destination.isFile || destination.length() == 0L) {
+            destination.delete()
+            throw IllegalStateException(
+                remoteError.ifBlank { errorText.toString().trim() }.ifBlank { "הפקודה הסתיימה ללא נתונים" }
+            )
+        }
+        return CommandResult(remoteExit, remoteError)
     }
 
     /** Streams a local binary archive to a remote command through adb exec-in. */
     fun execInFile(source: File, command: String, timeoutSeconds: Long = 300): CommandResult {
         require(source.isFile && source.canRead()) { "קובץ הגיבוי אינו קריא" }
         require(command.isNotBlank() && command.length <= 12_000) { "Invalid shell command" }
-        if (_running.value != true) throw IllegalStateException("אין חיבור ADB פעיל")
+        requireAdbBinaryBackend()
         val statusPath = remoteStatusPath()
         val wrapped = wrapWithRemoteStatus(command, statusPath)
-        val process = processForAdb(listOf("exec-in", "sh", "-c", wrapped))
+        val process = processForAdb(listOf("exec-in", wrapped))
         val errorText = StringBuilder()
         val reader = Thread {
             runCatching { process.errorStream.bufferedReader().use { errorText.append(it.readText()) } }
@@ -838,8 +888,8 @@ class ADB(private val context: Context) {
         if (process.exitValue() != 0) {
             throw IllegalStateException(errorText.toString().ifBlank { "העברת הנתונים למכשיר נכשלה" })
         }
-        val remoteExit = consumeRemoteStatus(statusPath)
-        return CommandResult(remoteExit, errorText.toString().trim())
+        val (remoteExit, remoteError) = consumeRemoteStatus(statusPath)
+        return CommandResult(remoteExit, remoteError.ifBlank { errorText.toString().trim() })
     }
 
     /** Installs a base APK together with all split APKs in one Package Manager session. */
@@ -847,17 +897,11 @@ class ADB(private val context: Context) {
         require(files.isNotEmpty() && files.all { it.isFile && it.canRead() }) {
             "קובצי APK חסרים או אינם קריאים"
         }
-        if (_running.value != true) throw IllegalStateException("אין חיבור ADB פעיל")
-        val args = mutableListOf(adbPath, "install-multiple", "-r")
-        args.addAll(files.map { it.absolutePath })
-        val process = ProcessBuilder(args)
-            .directory(context.filesDir)
-            .redirectErrorStream(true)
-            .apply {
-                environment().put("HOME", context.filesDir.path)
-                environment().put("TMPDIR", context.cacheDir.path)
-            }
-            .start()
+        requireAdbBinaryBackend()
+        val process = processForAdb(
+            listOf("install-multiple", "-r") + files.map { it.absolutePath },
+            mergeError = true
+        )
         val (exitCode, capturedOutput) = captureProcessOutput(process, 180, "התקנת חבילת APK חרגה מזמן ההמתנה")
         val output = capturedOutput.trim()
         debug("APK SET INSTALL:\n$output")

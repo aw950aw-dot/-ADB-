@@ -84,9 +84,19 @@ object RootAccessManager {
             destination.delete()
             throw IllegalStateException("קריאת נתוני Root לא הסתיימה בזמן.")
         }
-        if (process.exitValue() != 0 || !destination.isFile || destination.length() == 0L) {
+        val exit = process.exitValue()
+        if (exit != 0) {
             destination.delete()
-            throw IllegalStateException(errorText.toString().ifBlank { "Root לא הצליח לקרוא את תיקיית הנתונים." })
+            throw RemoteCommandException(
+                exit,
+                errorText.toString().trim().ifBlank { "Root לא הצליח לקרוא את תיקיית הנתונים (קוד $exit)." }
+            )
+        }
+        if (!destination.isFile || destination.length() == 0L) {
+            destination.delete()
+            throw IllegalStateException(
+                errorText.toString().trim().ifBlank { "Root לא החזיר נתונים מהתיקייה." }
+            )
         }
     }
 
