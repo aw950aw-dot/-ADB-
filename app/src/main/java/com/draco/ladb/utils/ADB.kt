@@ -23,7 +23,7 @@ class ADB(private val context: Context) {
         const val OUTPUT_BUFFER_DELAY_MS = 250L
 
         /** Total budget for start-server + connect + shell verification of one connection attempt. */
-        const val CONNECT_BUDGET_MS = 20_000L
+        const val CONNECT_BUDGET_MS = 30_000L
 
         @SuppressLint("StaticFieldLeak")
         @Volatile
@@ -203,26 +203,45 @@ class ADB(private val context: Context) {
             }
 
             if (connectEndpoint != null) {
-                // Loopback first: it does not depend on the current Wi-Fi address, so it keeps
-                // working after the network changes. The mDNS host is only a fallback.
-                val loopbackSerial = "127.0.0.1:" + connectEndpoint.port
+                // The Wi-Fi address (found by mDNS a moment ago) goes first: on many devices the
+                // Wireless Debugging port does not answer on loopback at all. Loopback is the fallback.
                 val mdnsSerial = connectEndpoint.serial
-                val candidates = listOf(loopbackSerial, mdnsSerial).distinct()
+                val loopbackSerial = "127.0.0.1:" + connectEndpoint.port
+                val candidates = listOf(mdnsSerial, loopbackSerial).distinct()
                 val failures = mutableListOf<String>()
-                for (serial in candidates) {
-                    val connectResult = captureProcessOutput(
-                        processForAdb(listOf("connect", serial), mergeError = true),
-                        remainingTimeoutSeconds(6),
-                        "חיבור ADB אל $serial חרג מזמן ההמתנה."
-                    )
-                    val output = connectResult.second.trim()
-                    debug("ADB CONNECT $serial: " + output.ifBlank { "exit=" + connectResult.first })
-                    if (connectResult.first == 0 &&
-                        !output.contains("unable to connect", ignoreCase = true) &&
-                        !output.contains("cannot connect", ignoreCase = true) &&
-                        !output.contains("failed", ignoreCase = true)
-                    ) { connectedSerial = serial; break }
-                    failures.add("$serial: " + output.ifBlank { "exit=" + connectResult.first })
+                // Two rounds: right after pairing the first TLS connect can be slow or refused.
+                // A timeout or error on one address is only a failure of that attempt; the next
+                // address / round is always tried while the time budget lasts.
+                attempts@ for (round in 1..2) {
+                    for (serial in candidates) {
+                        if (System.currentTimeMillis() >= connectionDeadline - 1_500L) break@attempts
+                        val capSeconds = if (round == 1) 8L else 6L
+                        debug("מתחבר אל $serial (ניסיון $round)…")
+                        var connected = false
+                        var detail = ""
+                        try {
+                            val connectResult = captureProcessOutput(
+                                processForAdb(listOf("connect", serial), mergeError = true),
+                                remainingTimeoutSeconds(capSeconds),
+                                "אין תגובה מ־$serial תוך $capSeconds שניות."
+                            )
+                            val output = connectResult.second.trim()
+                            detail = output.ifBlank { "exit=" + connectResult.first }
+                            debug("ADB CONNECT $serial: $detail")
+                            connected = connectResult.first == 0 &&
+                                !output.contains("unable to connect", ignoreCase = true) &&
+                                !output.contains("cannot connect", ignoreCase = true) &&
+                                !output.contains("failed", ignoreCase = true)
+                        } catch (error: Exception) {
+                            detail = error.message ?: "שגיאה לא ידועה"
+                            debug("ADB CONNECT $serial: $detail")
+                        }
+                        if (connected) {
+                            connectedSerial = serial
+                            break@attempts
+                        }
+                        failures.add("$serial (ניסיון $round): $detail")
+                    }
                 }
                 if (connectedSerial == null) {
                     throw IllegalStateException("השיוך הצליח, אך חיבור ADB נכשל בכל כתובות השירות המקומי:\n" + failures.joinToString("\n"))
