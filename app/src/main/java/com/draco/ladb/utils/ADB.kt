@@ -23,7 +23,7 @@ class ADB(private val context: Context) {
         const val OUTPUT_BUFFER_DELAY_MS = 250L
 
         /** Total budget for start-server + connect + shell verification of one connection attempt. */
-        const val CONNECT_BUDGET_MS = 30_000L
+        const val CONNECT_BUDGET_MS = 45_000L
 
         @SuppressLint("StaticFieldLeak")
         @Volatile
@@ -213,7 +213,7 @@ class ADB(private val context: Context) {
                 // A modern adb server connects to a freshly paired Wireless Debugging device by
                 // itself (mDNS). That is how LADB connects, and a second manual connection to the
                 // same device only competes with it, so give it a few seconds first.
-                val autoConnectUntil = minOf(connectionDeadline - 8_000L, System.currentTimeMillis() + 4_000L)
+                val autoConnectUntil = minOf(connectionDeadline - 15_000L, System.currentTimeMillis() + 12_000L)
                 val portText = connectEndpoint.port.toString()
                 while (connectedSerial == null && System.currentTimeMillis() < autoConnectUntil) {
                     val devices = runCatching { getDevices(2L) }.getOrDefault(emptyList())
@@ -226,12 +226,24 @@ class ADB(private val context: Context) {
                     }
                 }
 
+                // Fast adb-independent check of each address (see AdbProbe). Addresses where nothing is
+                // listening are skipped; the result is logged so a stuck device side is visible.
+                val probePort = connectEndpoint.port
+                val usable = if (connectedSerial != null) candidates else candidates.filter { serial ->
+                    val probe = AdbProbe.check(serial.substringBeforeLast(':'), probePort, 2_000)
+                    debug("בדיקת תגובה של $serial: $probe")
+                    probe != AdbProbe.Result.REFUSED && probe != AdbProbe.Result.UNREACHABLE
+                }
+                if (connectedSerial == null && usable.isEmpty()) {
+                    failures.add("אף כתובת לא עונה בפורט $probePort. כבה והדלק את 'ניפוי באגים אלחוטי' ונסה שוב.")
+                }
+
                 // Two rounds: right after pairing the first TLS connect can be slow or refused.
                 // A timeout or error on one address is only a failure of that attempt; the next
                 // address / round is always tried while the time budget lasts.
                 attempts@ for (round in 1..2) {
                     if (connectedSerial != null) break@attempts
-                    for (serial in candidates) {
+                    for (serial in usable) {
                         if (System.currentTimeMillis() >= connectionDeadline - 1_500L) break@attempts
                         val capSeconds = if (round == 1) 8L else 6L
                         debug("מתחבר אל $serial (ניסיון $round)…")
@@ -262,7 +274,7 @@ class ADB(private val context: Context) {
                     }
                 }
                 if (connectedSerial == null) {
-                    throw IllegalStateException("השיוך הצליח, אך חיבור ADB נכשל בכל כתובות השירות המקומי:\n" + failures.joinToString("\n"))
+                    throw IllegalStateException("חיבור ADB נכשל בכל כתובות השירות המקומי:\n" + failures.joinToString("\n"))
                 }
             } else {
                 captureProcessOutput(
@@ -510,32 +522,86 @@ class ADB(private val context: Context) {
     /**
      * Ask the device to pair on Android 11+ devices
      */
+    /**
+     * Pairs with the device. Returns true when the device is paired and ready to connect.
+     * If the pairing service never answers, the device may already trust this app's key from an
+     * earlier successful pairing, so a connection without new pairing is tried before giving up.
+     */
     fun pair(port: String, pairingCode: String, host: String = "localhost"): Boolean {
+        return when (pairOnly(port, pairingCode, host)) {
+            PairOutcome.SUCCESS -> true
+            PairOutcome.REFUSED -> false
+            PairOutcome.STUCK, PairOutcome.NO_ANSWER -> tryConnectWithoutPairing()
+        }
+    }
+
+    private fun tryConnectWithoutPairing(): Boolean {
+        debug("השיוך לא נענה. בודק אם המכשיר כבר משויך ומתחבר בלי שיוך חדש…")
+        val endpoint = runCatching { LocalAdbServiceDiscovery(context).findConnectEndpoint(6_000L) }.getOrNull()
+        if (endpoint == null) {
+            debug("לא נמצא שירות חיבור (_adb-tls-connect): ודא ש'ניפוי באגים אלחוטי' דלוק ומחובר ל-Wi-Fi.")
+            return false
+        }
+        val connected = runCatching { initServer(endpoint) }.getOrDefault(false)
+        debug(
+            if (connected) "התחברתי בלי שיוך חדש: המכשיר כבר היה משויך."
+            else "גם חיבור בלי שיוך חדש נכשל."
+        )
+        return connected
+    }
+
+    /** The device's own Wi-Fi IPv4 address: the same address Android shows in the pairing dialog. */
+    @Suppress("DEPRECATION")
+    private fun wifiIpv4Address(): String? = runCatching {
+        val manager = context.getSystemService(android.net.ConnectivityManager::class.java)
+        manager.allNetworks.firstNotNullOfOrNull { network ->
+            val capabilities = manager.getNetworkCapabilities(network)
+            if (capabilities == null || !capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)) {
+                null
+            } else {
+                manager.getLinkProperties(network)?.linkAddresses
+                    ?.map { it.address }
+                    ?.firstOrNull { it is java.net.Inet4Address && !it.isLoopbackAddress }
+                    ?.hostAddress
+            }
+        }
+    }.getOrNull()
+
+    private fun pairOnly(port: String, pairingCode: String, host: String): PairOutcome {
         val numericPort = port.toIntOrNull()
-        if (numericPort == null || numericPort !in 1..65535 || !pairingCode.matches(Regex("\\d{6}"))) return false
+        if (numericPort == null || numericPort !in 1..65535 || !pairingCode.matches(Regex("\\d{6}"))) {
+            return PairOutcome.REFUSED
+        }
 
         tryingToPair = true
         try {
             prepareAdbHome()
-            val cleanHost = host.trim().removePrefix("[").removeSuffix("]").ifBlank { "localhost" }
+            val requestedHost = host.trim().removePrefix("[").removeSuffix("]").ifBlank { "localhost" }
+            // The pairing dialog shows the device's Wi-Fi address; the one pairing that is known to
+            // have worked used exactly that address. Loopback is only a last resort.
+            val cleanHost = if (requestedHost == "localhost" || requestedHost == "127.0.0.1") {
+                wifiIpv4Address() ?: requestedHost
+            } else requestedHost
             val endpoint = if (cleanHost.contains(":")) "[$cleanHost]:$numericPort" else "$cleanHost:$numericPort"
+            debug("מבצע שיוך מול $endpoint")
 
             // A server left over from an earlier attempt can be stuck (for example inside a connect
             // that never answered). `adb pair` then waits for it forever and prints nothing, so
             // always start from a clean server.
             resetAdbServer()
+            var outcome = PairOutcome.STUCK
             for (attempt in 1..2) {
-                when (runPairOnce(endpoint, pairingCode, 15L)) {
-                    PairOutcome.SUCCESS -> return true
-                    PairOutcome.REFUSED -> return false
+                outcome = runPairOnce(endpoint, pairingCode, 15L)
+                when (outcome) {
+                    PairOutcome.SUCCESS, PairOutcome.REFUSED -> return outcome
                     PairOutcome.NO_ANSWER -> {
                         // The request did reach the adb server, so the code may already be used up.
                         // Retrying blindly would only make things worse.
                         debug(
-                            "המכשיר לא ענה לבקשת השיוך. כבה והדלק את 'ניפוי באגים אלחוטי', " +
+                            "המכשיר לא ענה לבקשת השיוך. אם זה נכשל שוב: כבה והדלק את 'ניפוי באגים אלחוטי', " +
                                 "פתח חלון התאמה חדש (קוד ופורט חדשים) ונסה שוב."
                         )
-                        return false
+                        return outcome
                     }
                     PairOutcome.STUCK -> {
                         // adb never got as far as starting its server, so no request was sent and
@@ -547,10 +613,10 @@ class ADB(private val context: Context) {
                     }
                 }
             }
-            return false
+            return outcome
         } catch (error: Exception) {
             debug("ADB pairing error: ${error.message ?: "unknown error"}")
-            return false
+            return PairOutcome.REFUSED
         } finally {
             // Match the proven LADB pairing lifecycle: stop the pair session's server,
             // then let initServer create a clean server for the TLS connection.
