@@ -1,0 +1,183 @@
+name: Apply update and build
+
+# One file does everything:
+#   1. If a ZIP is in the  updates/  folder (or in the main folder), it is unpacked over the project and removed.
+#      A ZIP that contains the file REPLACE_ALL.txt replaces the whole project (old files are deleted).
+#   2. The APK is built and published as an artifact called "SmartBackup-APK".
+# It also runs on every normal push to main and can be started manually (Actions > Run workflow).
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: smartbackup-build
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Unpack ZIP files from updates/
+        id: apply
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          zips=(updates/*.zip ./*.zip)
+          if [ ${#zips[@]} -eq 0 ]; then
+            echo "No ZIP files found - nothing to apply."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          readarray -t zips < <(printf '%s\n' "${zips[@]}" | sort)
+
+          is_project_root() {
+            local d="$1" m
+            for m in app docs gradle .github build.gradle settings.gradle gradle.properties README.md; do
+              [ -e "$d/$m" ] && return 0
+            done
+            return 1
+          }
+          find_root() {
+            local d="$1"
+            if is_project_root "$d"; then echo "$d"; return; fi
+            local entries=()
+            while IFS= read -r e; do entries+=("$e"); done < <(find "$d" -mindepth 1 -maxdepth 1)
+            if [ "${#entries[@]}" -eq 1 ] && [ -d "${entries[0]}" ]; then
+              find_root "${entries[0]}"; return
+            fi
+            echo "$d"
+          }
+
+          applied=""
+          for zip in "${zips[@]}"; do
+            echo "::group::Applying $zip"
+            tmp="$(mktemp -d)"
+            unzip -q -o "$zip" -d "$tmp" || [ $? -eq 1 ]
+            rm -rf "$tmp/__MACOSX"
+            find "$tmp" -name '.DS_Store' -delete
+            find "$tmp" -type l -delete
+
+            root="$(find_root "$tmp")"
+            if ! is_project_root "$root"; then
+              echo "::error file=$zip::This ZIP does not look like the project. Nothing was changed."
+              exit 1
+            fi
+
+            if [ -f "$root/REPLACE_ALL.txt" ]; then
+              echo "REPLACE_ALL.txt found: removing the old project files first."
+              find . -mindepth 1 -maxdepth 1 ! -name '.git' ! -name '.github' ! -name 'updates' ! -name '*.zip' -exec rm -rf {} +
+              rm -f "$root/REPLACE_ALL.txt"
+            fi
+            if [ -d "$root/.github/workflows" ]; then
+              echo "::warning file=$zip::.github/workflows inside the ZIP is skipped; edit workflow files on GitHub directly."
+            fi
+
+            tar -C "$root" \
+              --exclude='./.git' --exclude='*/.git' \
+              --exclude='./.github/workflows' \
+              --exclude='./updates' \
+              -cf - . | tar -C . --no-same-owner --no-overwrite-dir -xf -
+
+            git rm -q -f -- "$zip"
+            applied="$applied $(basename "$zip")"
+            rm -rf "$tmp"
+            echo "::endgroup::"
+          done
+
+          [ -f gradlew ] && chmod +x gradlew || true
+          git add -A
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "names=${applied# }" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Update applied"
+              echo "ZIP: \`${applied# }\`"
+              echo '```'
+              git diff --cached --stat | tail -n 40
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Commit and push
+        if: steps.apply.outputs.changed == 'true'
+        env:
+          BRANCH: ${{ github.ref_name }}
+          NAMES: ${{ steps.apply.outputs.names }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Apply update: $NAMES"
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:$BRANCH"; then exit 0; fi
+            git pull --rebase origin "$BRANCH"
+          done
+          echo "::error::Could not push the update."
+          exit 1
+
+  build:
+    needs: apply
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout (latest, including the applied update)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Install Android SDK packages
+        run: |
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)
+          yes | "$SDKMANAGER" --licenses || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Build release APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon --console=plain --stacktrace
+
+      - name: Verify signature
+        run: |
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | head -n 5 || true
+          sha256sum "$APK"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartBackup-APK
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
