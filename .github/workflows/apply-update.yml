@@ -162,10 +162,38 @@ jobs:
           yes | "$SDKMANAGER" --licenses || true
           "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Build release APK
+      # First try: with the direct wireless-ADB component. If that component cannot be downloaded or
+      # compiled, the build is repeated without it (Shizuku / Root only), so an APK is always produced.
+      - name: Build release APK (with direct wireless ADB)
+        id: build_full
+        continue-on-error: true
+        shell: bash
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleRelease --no-daemon --console=plain --stacktrace
+          set -o pipefail
+          ./gradlew assembleRelease -PwithLibAdb=true --no-daemon --console=plain --stacktrace 2>&1 | tee build-full.log
+
+      - name: Why the full build failed
+        if: steps.build_full.outcome == 'failure'
+        shell: bash
+        run: |
+          {
+            echo "### The build WITH direct wireless ADB failed - building the fallback version"
+            echo '```'
+            grep -E "^e: |error:|Could not resolve|Could not find|FAILED|What went wrong" -A2 build-full.log | head -60
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the failed build log
+        if: steps.build_full.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-full
+          path: build-full.log
+
+      - name: Fallback build (Shizuku / Root only)
+        if: steps.build_full.outcome == 'failure'
+        run: ./gradlew clean assembleRelease -PwithLibAdb=false --no-daemon --console=plain --stacktrace
 
       - name: Verify signature
         run: |
