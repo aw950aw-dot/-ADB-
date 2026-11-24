@@ -1,5 +1,7 @@
 package com.aw950aw.smartbackup.shell
 
+import com.aw950aw.smartbackup.wireless.WirelessLink
+import com.aw950aw.smartbackup.wireless.WirelessState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
@@ -14,6 +16,8 @@ object Privileges {
     fun currentShell(): PrivilegedShell? {
         val root = rootShell.value
         if (root != null) return root
+        val wireless = (WirelessLink.state.value as? WirelessState.Ready)?.shell
+        if (wireless != null) return wireless
         return (ShizukuLink.state.value as? ShizukuState.Ready)?.shell
     }
 

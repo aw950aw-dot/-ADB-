@@ -9,12 +9,14 @@ import androidx.activity.compose.setContent
 import com.aw950aw.smartbackup.shell.ShizukuLink
 import com.aw950aw.smartbackup.ui.AppRoot
 import com.aw950aw.smartbackup.ui.SmartBackupTheme
+import com.aw950aw.smartbackup.wireless.WirelessLink
 
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ShizukuLink.init(applicationContext)
+        WirelessLink.init(applicationContext)
 
         // Android 13+ asks before showing the progress notification. Backups also work if the user declines.
         if (Build.VERSION.SDK_INT >= 33 &&

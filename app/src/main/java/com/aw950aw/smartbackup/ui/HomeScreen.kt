@@ -34,6 +34,8 @@ import com.aw950aw.smartbackup.shell.PrivilegedShell
 import com.aw950aw.smartbackup.shell.Privileges
 import com.aw950aw.smartbackup.shell.ShizukuLink
 import com.aw950aw.smartbackup.shell.ShizukuState
+import com.aw950aw.smartbackup.wireless.WirelessLink
+import com.aw950aw.smartbackup.wireless.WirelessState
 import kotlinx.coroutines.launch
 
 private const val SHIZUKU_DOWNLOAD_URL = "https://shizuku.rikka.app/download/"
@@ -61,7 +63,10 @@ fun HomeScreen(vm: MainViewModel) {
     val root by Privileges.rootShell.collectAsStateWithLifecycle()
     val rootChecking by Privileges.rootChecking.collectAsStateWithLifecycle()
     val rootMessage by Privileges.rootMessage.collectAsStateWithLifecycle()
-    val shell: PrivilegedShell? = root ?: (shizuku as? ShizukuState.Ready)?.shell
+    val wireless by WirelessLink.state.collectAsStateWithLifecycle()
+    val shell: PrivilegedShell? = root
+        ?: (wireless as? WirelessState.Ready)?.shell
+        ?: (shizuku as? ShizukuState.Ready)?.shell
 
     ScreenScaffold(title = "גיבוי חכם", onBack = null) { padding ->
         Column(
@@ -79,7 +84,9 @@ fun HomeScreen(vm: MainViewModel) {
             )
 
             // ---- connection --------------------------------------------------------------
-            SectionCard(title = "חיבור למערכת") {
+            DirectConnectionCard(wireless)
+
+            SectionCard(title = if (shell != null) "חיבור למערכת" else "חלופה: Shizuku") {
                 if (shell != null) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         StatusPill("מחובר", good = true)
