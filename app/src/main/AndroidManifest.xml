@@ -1,57 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" android:installLocation="internalOnly">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <queries>
-        <package android:name="moe.shizuku.privileged.api"/>
-        <intent>
-            <action android:name="android.settings.WIRELESS_DEBUGGING_PAIRING_DIALOG"/>
-        </intent>
-        <intent>
-            <action android:name="android.settings.WIRELESS_DEBUGGING_SETTINGS"/>
-        </intent>
+        <package android:name="moe.shizuku.privileged.api" />
     </queries>
-    <uses-feature android:name="android.software.leanback" android:required="false"/>
-    <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
-    <uses-feature android:name="android.hardware.wifi" android:required="false"/>
-    <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
-    <uses-permission android:name="android.permission.INTERNET"/>
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
-    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions"/>
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
-    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
-    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE"/>
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <uses-permission android:name="android.permission.WAKE_LOCK"/>
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
-    <application android:banner="@drawable/banner" android:icon="@mipmap/ic_launcher" android:label="@string/app_name" android:roundIcon="@mipmap/ic_launcher_round" android:supportsRtl="true" android:theme="@style/Theme.LADB">
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.SmartBackup">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|density|fontScale|uiMode|layoutDirection|locale"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".jobs.JobService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"
             android:enabled="true"
             android:exported="true"
             android:multiprocess="false"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL"/>
-        <activity android:name=".views.AboutActivity" android:exported="false" android:label="אודות ADB SMART"/>
-        <activity android:name=".views.AppDataBackupActivity" android:exported="false" android:label="גיבוי נתוני ADB SMART"/>
-        <activity android:name=".views.ConnectionActivity" android:exported="false" android:launchMode="singleTop" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|density|fontScale" android:windowSoftInputMode="adjustResize" android:label="חיבור Wireless Debugging"/>
-        <activity android:name=".views.AppBackupPickerActivity" android:exported="false" android:label="בחר אפליקציה לגיבוי"/>
-        <activity android:name=".views.AppManagerHubActivity" android:exported="false" android:label="ניהול אפליקציות"/>
-        <activity android:name=".views.AppTransferActivity" android:exported="false" android:launchMode="singleTop" android:label="גיבוי ושחזור אפליקציות"/>
-        <service android:name=".services.BackupService" android:exported="false" android:foregroundServiceType="dataSync"/>
-        <activity android:name=".views.DashboardActivity" android:exported="true">
-            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/><category android:name="android.intent.category.LEANBACK_LAUNCHER"/></intent-filter>
-        </activity>
-        <activity android:name=".views.SettingsActivity" android:exported="false" android:label="הגדרות"/>
-        <activity android:name=".views.AppManagerActivity" android:exported="false" android:label="ניהול אפליקציות"/>
-        <activity android:name=".views.AppPermissionActivity" android:exported="false" android:label="ניהול הרשאות אפליקציות"/>
-        <activity android:name=".views.PresetsActivity" android:exported="false" android:label="פקודות מוכנות"/>
-        <activity android:name=".views.MainActivity" android:exported="false"/>
-        <activity android:name=".views.HelpActivity" android:label="@string/more"/>
-        <activity android:name=".views.BookmarksActivity" android:label="@string/bookmarks"/>
-        <service android:name=".services.QSTile" android:exported="true" android:icon="@drawable/ic_baseline_adb_24" android:label="@string/app_name" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"><intent-filter><action android:name="android.service.quicksettings.action.QS_TILE"/></intent-filter></service>
-        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.provider" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/provider_paths"/></provider>
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 </manifest>

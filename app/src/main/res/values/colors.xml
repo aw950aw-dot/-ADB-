@@ -1,1 +1,5 @@
-<resources><color name="green">#1769D2</color></resources>
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="window_background">#F3F6FA</color>
+    <color name="icon_background">#0E2A47</color>
+</resources>

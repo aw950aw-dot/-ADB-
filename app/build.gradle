@@ -1,86 +1,57 @@
 plugins {
     id 'com.android.application'
     id 'kotlin-android'
-    id 'com.google.android.gms.oss-licenses-plugin'
-}
-
-def releaseStorePath = System.getenv("ADB_SMART_KEYSTORE_PATH")
-def releaseStorePassword = System.getenv("ADB_SMART_STORE_PASSWORD")
-def releaseKeyAlias = System.getenv("ADB_SMART_KEY_ALIAS")
-def releaseKeyPassword = System.getenv("ADB_SMART_KEY_PASSWORD")
-def hasAnyReleaseSigning = [releaseStorePath, releaseStorePassword, releaseKeyAlias, releaseKeyPassword]
-    .any { it != null && !it.isEmpty() }
-def hasCompleteReleaseSigning = [releaseStorePath, releaseStorePassword, releaseKeyAlias, releaseKeyPassword]
-    .every { it != null && !it.isEmpty() }
-if (hasAnyReleaseSigning && !hasCompleteReleaseSigning) {
-    throw new GradleException("ADB SMART release signing is incomplete. Configure all four ADB_SMART_* signing values.")
+    id 'org.jetbrains.kotlin.plugin.compose'
 }
 
 android {
+    namespace 'com.aw950aw.smartbackup'
     compileSdk 36
 
     defaultConfig {
-        applicationId "com.aw950aw.adbsmart"
+        applicationId "com.aw950aw.smartbackup"
         minSdk 26
-        targetSdk 33
-        versionCode 22
-        versionName "2.0.1"
-
-        ndk {
-            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'
-        }
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
     }
 
+    // A fixed key that lives in the repository, so every build is signed the same way and a new
+    // APK can always be installed over the previous one (no more "signature mismatch").
     signingConfigs {
-        debug {
-            enableV1Signing = true
-            enableV2Signing = true
-        }
         release {
+            storeFile file('smartbackup.jks')
+            storePassword 'smartbackup'
+            keyAlias 'smartbackup'
+            keyPassword 'smartbackup'
             enableV1Signing = true
             enableV2Signing = true
-            if (hasCompleteReleaseSigning) {
-                storeFile file(releaseStorePath)
-                storePassword releaseStorePassword
-                keyAlias releaseKeyAlias
-                keyPassword releaseKeyPassword
-            }
         }
     }
 
     buildTypes {
         release {
-            signingConfig hasCompleteReleaseSigning ? signingConfigs.release : signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled false
             shrinkResources false
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-
-            buildConfigField 'Boolean', 'ANTI_PIRACY', RELEASE_ANTIPIRACY
         }
-
         debug {
-            buildConfigField 'Boolean', 'ANTI_PIRACY', DEBUG_ANTIPIRACY
+            signingConfig signingConfigs.release
         }
     }
+
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
     kotlinOptions {
-        jvmTarget = '1.8'
-    }
-
-    packagingOptions {
-        jniLibs {
-            useLegacyPackaging = true
-        }
+        jvmTarget = '17'
     }
 
     buildFeatures {
-        viewBinding true
+        compose true
         aidl true
     }
-    namespace 'com.draco.ladb'
 }
 
 dependencies {
@@ -88,21 +59,16 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
 
     implementation 'androidx.core:core-ktx:1.16.0'
-    implementation 'androidx.appcompat:appcompat:1.7.0'
-    implementation 'androidx.preference:preference-ktx:1.2.1'
-    implementation 'androidx.fragment:fragment-ktx:1.8.7'
-    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.0'
-    implementation 'androidx.lifecycle:lifecycle-livedata-ktx:2.9.0'
-    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.9.0'
+    implementation 'androidx.activity:activity-compose:1.10.1'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.9.0'
 
+    implementation platform('androidx.compose:compose-bom:2025.05.00')
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.foundation:foundation'
+    implementation 'androidx.compose.material3:material3'
 
-    implementation("androidx.activity:activity-ktx:1.10.1")
-
-    implementation 'com.google.android.material:material:1.12.0'
-    implementation 'androidx.drawerlayout:drawerlayout:1.2.0'
-    implementation 'com.google.android.gms:play-services-oss-licenses:17.1.0'
-
-    // Official Shizuku API: request user-approved shell access through a UserService.
+    // Official Shizuku API (privileged shell without root).
     implementation "dev.rikka.shizuku:api:13.1.5"
     implementation "dev.rikka.shizuku:provider:13.1.5"
 }
