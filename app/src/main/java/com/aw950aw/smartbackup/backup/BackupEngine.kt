@@ -68,7 +68,7 @@ object BackupEngine {
                     val entryName = "apk/$name"
                     zip.putNextEntry(ZipEntry(entryName))
                     val sink = DigestCountingStream(zip)
-                    copyApk(shell, file, sink, cancel)
+                    copyApk(shell, file, ProgressOutputStream(sink, "מעתיק $name", file.length(), progress), cancel)
                     zip.closeEntry()
                     apkApks.add(ManifestApk(entryName, name, sink.count, sink.sha256()))
                     totalBytes += sink.count
@@ -86,7 +86,8 @@ object BackupEngine {
                 zip.putNextEntry(ZipEntry(entryName))
                 val sink = DigestCountingStream(zip)
                 val errors = StringBuilder()
-                val exit = shell.pipeOut(spec.command, sink, errors, cancel)
+                val shown = ProgressOutputStream(sink, "מעתיק ${spec.title}", -1L, progress)
+                val exit = shell.pipeOut(spec.command, shown, errors, cancel)
                 zip.closeEntry()
                 if (sink.count == 0L) {
                     notes.add("${spec.title}: לא התקבלו נתונים. ${errors.toString().trim().take(200)}")
@@ -131,13 +132,16 @@ object BackupEngine {
     }
 
     private fun copyApk(shell: PrivilegedShell, file: File, sink: OutputStream, cancel: CancelToken) {
-        if (file.canRead()) {
-            try {
-                FileInputStream(file).use { copyWithCancel(it, sink, cancel) }
-                return
-            } catch (error: SecurityException) {
-                // fall through to the shell
-            }
+        // Reading the APK directly is the fastest way and needs no shell at all.
+        var direct: FileInputStream? = null
+        try {
+            direct = FileInputStream(file)
+        } catch (_: IOException) {
+        } catch (_: SecurityException) {
+        }
+        if (direct != null) {
+            direct.use { copyWithCancel(it, sink, cancel) }
+            return
         }
         val errors = StringBuilder()
         val exit = shell.pipeOut("cat ${shellQuote(file.absolutePath)}", sink, errors, cancel)

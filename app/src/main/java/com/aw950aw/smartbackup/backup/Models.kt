@@ -214,3 +214,40 @@ fun copyWithCancel(input: InputStream, output: OutputStream, cancel: CancelToken
         output.write(buffer, 0, count)
     }
 }
+
+/** Reports how many bytes went through (and how fast), at most a few times per second. */
+class ProgressOutputStream(
+    private val target: OutputStream,
+    private val label: String,
+    private val totalBytes: Long,
+    private val progress: (String) -> Unit
+) : OutputStream() {
+    private var bytes = 0L
+    private val startedAt = System.currentTimeMillis()
+    private var lastReport = 0L
+
+    override fun write(b: Int) {
+        target.write(b)
+        bytes++
+        tick()
+    }
+
+    override fun write(b: ByteArray, off: Int, len: Int) {
+        target.write(b, off, len)
+        bytes += len
+        tick()
+    }
+
+    override fun flush() {
+        target.flush()
+    }
+
+    private fun tick() {
+        val now = System.currentTimeMillis()
+        if (now - lastReport < 400L) return
+        lastReport = now
+        val seconds = maxOf(1L, (now - startedAt) / 1000L)
+        val done = if (totalBytes > 0) "${formatBytes(bytes)} מתוך ${formatBytes(totalBytes)}" else formatBytes(bytes)
+        progress("$label\n$done · ${formatBytes(bytes / seconds)}/s")
+    }
+}
