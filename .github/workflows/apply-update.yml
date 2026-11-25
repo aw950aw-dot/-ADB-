@@ -170,8 +170,30 @@ jobs:
         shell: bash
         run: |
           chmod +x ./gradlew
-          set -o pipefail
-          ./gradlew assembleRelease -PwithLibAdb=true --no-daemon --console=plain --stacktrace 2>&1 | tee build-full.log
+          # libadb-android lives on JitPack. Try the likely coordinates one by one; JitPack may need
+          # a minute to build a version the first time, hence the retry.
+          candidates=(
+            "com.github.MuntashirAkon:libadb-android:master-SNAPSHOT"
+            "com.github.MuntashirAkon.libadb-android:libadb:master-SNAPSHOT"
+            "com.github.MuntashirAkon:libadb-android:main-SNAPSHOT"
+            "io.github.muntashirakon:libadb-android:3.0.0"
+          )
+          : > build-full.log
+          ok=false
+          for c in "${candidates[@]}"; do
+            for attempt in 1 2; do
+              echo "=== Trying $c (attempt $attempt) ===" | tee -a build-full.log
+              ./gradlew assembleRelease -PwithLibAdb=true "-PlibAdbCoordinate=$c" --refresh-dependencies --no-daemon --console=plain --stacktrace 2>&1 | tee -a build-full.log
+              if [ "${PIPESTATUS[0]}" -eq 0 ]; then
+                ok=true
+                echo "$c" > used-libadb.txt
+                echo "### Direct wireless ADB build OK using \`$c\`" >> "$GITHUB_STEP_SUMMARY"
+                break 2
+              fi
+              sleep 45
+            done
+          done
+          [ "$ok" = true ]
 
       - name: Why the full build failed
         if: steps.build_full.outcome == 'failure'
@@ -180,7 +202,7 @@ jobs:
           {
             echo "### The build WITH direct wireless ADB failed - building the fallback version"
             echo '```'
-            grep -E "^e: |error:|Could not resolve|Could not find|FAILED|What went wrong" -A2 build-full.log | head -60
+            grep -E "=== Trying|^e: |error:|Could not resolve|Could not find|What went wrong" -A1 build-full.log | head -80
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
