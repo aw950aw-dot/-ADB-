@@ -32,6 +32,11 @@ object JobState {
     @Volatile
     private var token: CancelToken? = null
 
+    /** When the running job last reported progress; used to detect a job that is stuck. */
+    @Volatile
+    var lastUpdate: Long = System.currentTimeMillis()
+        private set
+
     val isRunning: Boolean get() = progressFlow.value != null || pending != null
 
     /** Returns false if a job is already running. */
@@ -49,11 +54,13 @@ object JobState {
         pending = null
         val newToken = CancelToken()
         token = newToken
+        lastUpdate = System.currentTimeMillis()
         progressFlow.value = JobProgress(title, "מתחיל…")
         return request to newToken
     }
 
     fun update(title: String, message: String) {
+        lastUpdate = System.currentTimeMillis()
         if (progressFlow.value != null) progressFlow.value = JobProgress(title, message)
     }
 

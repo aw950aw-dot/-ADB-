@@ -180,6 +180,14 @@ object WirelessLink {
         }
     }
 
+    /** Called when a command found the connection dead; the UI then offers to reconnect. */
+    fun linkDied(reason: String) {
+        log("החיבור לא מגיב: $reason")
+        if (stateFlow.value is WirelessState.Ready) {
+            stateFlow.value = WirelessState.Failed("$reason התחבר מחדש.")
+        }
+    }
+
     fun disconnect() {
         try {
             api?.disconnect()

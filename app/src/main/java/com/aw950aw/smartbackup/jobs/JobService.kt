@@ -20,6 +20,7 @@ import com.aw950aw.smartbackup.backup.formatBytes
 import com.aw950aw.smartbackup.shell.Privileges
 import java.io.File
 import java.util.concurrent.CancellationException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /**
@@ -51,14 +52,56 @@ class JobService : Service() {
         val cancel = taken.second
         val title = if (request is JobRequest.Backup) "גיבוי" else "שחזור"
 
-        thread(name = "backup-job", isDaemon = false) {
-            val wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
+        // Only the first of "worker finished" / "watchdog gave up" may close the job.
+        val closed = AtomicBoolean(false)
+        val wakeLock: PowerManager.WakeLock? = try {
+            val lock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
                 .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "smartbackup:job")
-            try {
-                wakeLock.acquire(3L * 60L * 60L * 1000L)
-            } catch (_: Exception) {
-            }
+            lock.acquire(3L * 60L * 60L * 1000L)
+            lock
+        } catch (_: Exception) {
+            null
+        }
 
+        val closeJob: (JobOutcome) -> Unit = { outcome ->
+            if (closed.compareAndSet(false, true)) {
+                try {
+                    if (wakeLock != null && wakeLock.isHeld) wakeLock.release()
+                } catch (_: Exception) {
+                }
+                JobState.finish(outcome)
+                postNotification(
+                    NotificationCompat.Builder(this, CHANNEL_ID)
+                        .setSmallIcon(android.R.drawable.stat_notify_sync)
+                        .setContentTitle(outcome.title)
+                        .setContentText(outcome.text.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty())
+                        .setStyle(NotificationCompat.BigTextStyle().bigText(outcome.text))
+                        .setAutoCancel(true)
+                        .setContentIntent(openAppIntent())
+                        .build(),
+                    RESULT_ID
+                )
+                try {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                } catch (_: Exception) {
+                }
+                stopSelf()
+            }
+        }
+
+        // Clean-up that must also happen when the worker is stuck and has to be abandoned.
+        val cleanUp: () -> Unit = {
+            if (request is JobRequest.Backup) {
+                try {
+                    DocumentsContract.deleteDocument(contentResolver, request.destination)
+                } catch (_: Exception) {
+                }
+            } else if (request is JobRequest.Restore) {
+                request.zipFile.parentFile?.deleteRecursively()
+            }
+        }
+
+        thread(name = "backup-job", isDaemon = false) {
             val report: (String) -> Unit = { message ->
                 JobState.update(title, message)
                 postNotification(buildNotification(title, message))
@@ -66,7 +109,12 @@ class JobService : Service() {
 
             val outcome = try {
                 val shell = Privileges.currentShell()
-                    ?: throw IllegalStateException("אין חיבור פעיל ל-Shizuku או ל-Root. חזור למסך הראשי והתחבר.")
+                    ?: throw IllegalStateException("אין חיבור פעיל. חזור למסך הראשי והתחבר.")
+                report("בודק את החיבור למכשיר…")
+                val check = shell.exec("echo ok")
+                if (!check.output.contains("ok")) {
+                    throw IllegalStateException("החיבור למכשיר לא עונה. נתק, התחבר מחדש ונסה שוב.")
+                }
                 when (request) {
                     is JobRequest.Backup -> runBackup(request, shell, cancel, report)
                     is JobRequest.Restore -> runRestore(request, shell, cancel, report)
@@ -76,25 +124,39 @@ class JobService : Service() {
             } catch (error: Throwable) {
                 JobOutcome(false, "$title נכשל", friendlyError(error))
             }
+            closeJob(outcome)
+        }
 
-            try {
-                if (wakeLock.isHeld) wakeLock.release()
-            } catch (_: Exception) {
+        // Watchdog: a cancel must always end the job within seconds, and a job that reports nothing
+        // for three minutes is declared stuck. A stuck worker is abandoned instead of waited for.
+        thread(name = "backup-watchdog", isDaemon = true) {
+            var cancelledAt = 0L
+            while (!closed.get()) {
+                try {
+                    Thread.sleep(500)
+                } catch (_: InterruptedException) {
+                    return@thread
+                }
+                val now = System.currentTimeMillis()
+                if (cancel.cancelled) {
+                    if (cancelledAt == 0L) cancelledAt = now
+                    if (now - cancelledAt > 4_000L) {
+                        cleanUp()
+                        closeJob(JobOutcome(false, "$title בוטל", "הפעולה בוטלה לפי בקשתך."))
+                        return@thread
+                    }
+                } else if (now - JobState.lastUpdate > 180_000L) {
+                    cancel.cancel()
+                    cleanUp()
+                    closeJob(
+                        JobOutcome(
+                            false, "$title נתקע",
+                            "הפעולה לא התקדמה במשך 3 דקות ולכן נעצרה. בדוק שהמכשיר עדיין מחובר, התחבר מחדש ונסה שוב."
+                        )
+                    )
+                    return@thread
+                }
             }
-            JobState.finish(outcome)
-            postNotification(
-                NotificationCompat.Builder(this, CHANNEL_ID)
-                    .setSmallIcon(android.R.drawable.stat_notify_sync)
-                    .setContentTitle(outcome.title)
-                    .setContentText(outcome.text.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty())
-                    .setStyle(NotificationCompat.BigTextStyle().bigText(outcome.text))
-                    .setAutoCancel(true)
-                    .setContentIntent(openAppIntent())
-                    .build(),
-                RESULT_ID
-            )
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
         }
         return START_NOT_STICKY
     }
